@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/ngis_openapi_client" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>

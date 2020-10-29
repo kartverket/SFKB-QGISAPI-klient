@@ -30,9 +30,11 @@ from qgis.core import (
     QgsVectorLayer,
     QgsOgcUtils,
     QgsFeature,
-    QgsJsonUtils
+    QgsJsonUtils,
+    QgsWkbTypes
 )
 
+import json
 from .login import NgisOpenApiClientAuthentication
 from .http_client import NgisHttpClient
 
@@ -225,49 +227,56 @@ class NgisOpenApiClient:
     def create_layer(self):
         """Create a new layer by name (rev_lyr)"""
 
-        # gets list of layer objects
-        layers = list(QgsProject.instance().mapLayers().values())
-        # gets list of name of all layers present in workspace
-        layers_name = [l.name() for l in layers]
-        # check if layer by name of 'rev_lyr' is present in workspace
-        if not 'rev_lyr' in layers_name:
-            # creates new 'rev_lyr' layer
-            # note that this is memory layer and its not present physically though it can be exported in desired format
-            lyr = QgsVectorLayer("LineString25D?crs=epsg:4326", "rev_lyr", "memory")
-            # adds new 'rev_lyr' layer to the workspace
-            QgsProject.instance().addMapLayer(lyr)
-        layers = QgsProject.instance().mapLayersByName('rev_lyr')
-        # if multiple layers are present with name 'rev_lyr', selects first 'rev_lyr'
-        rev_lyr = layers[0]
-        rev_lyr.startEditing()
-        # get data provider of 'rev_lyr' layer so that new feature can be inserted
-        l_d = rev_lyr.dataProvider()
         auth = NgisOpenApiClientAuthentication()
         configId = self.dlg.mAuthConfigSelect.configId()
         username, password = auth.getUser(configId)
         client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
+
         datasets = client.getAvailableDatasets()
         metadata = client.getDatasetMetadata(datasets[0]['id'])
         features = client.getDatasetFeatures(metadata.id, metadata.bbox, metadata.coordinate_reference_system)
-        hei = len(features['features'])
-        import json
-        features_json = json.dumps(features) 
-        codec = QTextCodec.codecForName("System")   
+        
+        features_json = json.dumps(features, ensure_ascii=False) 
+        codec = QTextCodec.codecForName("UTF-8")   
         fields = QgsJsonUtils.stringToFields(features_json, codec)
         newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
-        if newFeatures:                
-            print("It works")
-            # adds feature to the 'rev_lyr' layer
-            l_d.addFeatures(newFeatures)
-        # update the extent of rev_lyr
-        rev_lyr.updateExtents()
-        # save changes made in 'rev_lyr'
-        rev_lyr.commitChanges()
+
+        geometry_dict = {}
+        if newFeatures:   
+            for feature in newFeatures:
+
+                featuretype = feature.attribute('featuretype')
+                geom_type = feature.geometry()
+                geom_type = QgsWkbTypes.displayString(int(geom_type.wkbType()))
+                if geom_type not in geometry_dict:
+                    geometry_dict[geom_type] = {}
+                if featuretype not in geometry_dict[geom_type]:
+                    geometry_dict[geom_type][featuretype] = []
+                
+                geometry_dict[geom_type][featuretype].append(feature)
+
+        for geom_type, feature_types in geometry_dict.items():
+            for feature_type, features in feature_types.items():
+                lyr = QgsVectorLayer(f'{geom_type}?crs=epsg:4326', f'{feature_type}-{geom_type}', "memory")
+                QgsProject.instance().addMapLayer(lyr)
+                lyr.startEditing()
+                for field in fields:
+                    addAttribute = lyr.addAttribute(field)
+                # save changes made in 'rev_lyr'
+                lyr.commitChanges()
+
+                l_d = lyr.dataProvider()
+                l_d.addFeatures(features)
+                # update the extent of rev_lyr
+                lyr.updateExtents()
+                # save changes made in 'rev_lyr'
+                lyr.commitChanges()
 
     def run(self):
         """Run method that performs all the real work"""
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
+
         if self.first_start == True:
             self.first_start = False
             self.dlg = NgisOpenApiClientDialog()

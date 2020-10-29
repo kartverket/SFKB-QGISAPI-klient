@@ -21,9 +21,20 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+from qgis.core import (
+    QgsProject,
+    QgsPathResolver,
+    QgsVectorLayer,
+    QgsOgcUtils,
+    QgsFeature,
+    QgsJsonUtils
+)
+
+from .login import NgisOpenApiClientAuthentication
+from .http_client import NgisHttpClient
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -179,19 +190,94 @@ class NgisOpenApiClient:
                 action)
             self.iface.removeToolBarIcon(action)
 
+    def handle_login(self):
+        auth = NgisOpenApiClientAuthentication()
+        configId = self.dlg.mAuthConfigSelect.configId()
+        username, password = auth.getUser(configId)
+        if not username:
+            self.dlg.statusLabel.setText("Autentisering mislyktes")
+            return
+        client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
+        datasets = client.getAvailableDatasets()
+        if len(datasets) == 0:
+            self.dlg.statusLabel.setText("Kunne ikke hente datasett")
+            return
+        names = [dataset['name'] for dataset in datasets]
+        self.dlg.mComboBox.addItems(names)
+        self.dlg.mComboBox.setDefaultText(names[0])
+        self.dlg.logInButton.setEnabled(False)
+        self.dlg.logOutButton.setEnabled(True)
+        self.dlg.addLayerButton.setEnabled(True)
+        self.dlg.mAuthConfigSelect.setEnabled(False)
+        return
+
+    def handle_logout(self):
+        self.dlg.mComboBox.setDefaultText('')
+        self.dlg.mComboBox.clear()
+        self.dlg.logInButton.setEnabled(True)
+        self.dlg.logOutButton.setEnabled(False)
+        self.dlg.addLayerButton.setEnabled(False)
+        self.dlg.mAuthConfigSelect.setEnabled(True)
+    
+    def handle_add_layer(self):
+        self.create_layer()
+
+    def create_layer(self):
+        """Create a new layer by name (rev_lyr)"""
+
+        # gets list of layer objects
+        layers = list(QgsProject.instance().mapLayers().values())
+        # gets list of name of all layers present in workspace
+        layers_name = [l.name() for l in layers]
+        # check if layer by name of 'rev_lyr' is present in workspace
+        if not 'rev_lyr' in layers_name:
+            # creates new 'rev_lyr' layer
+            # note that this is memory layer and its not present physically though it can be exported in desired format
+            lyr = QgsVectorLayer("LineString25D?crs=epsg:4326", "rev_lyr", "memory")
+            # adds new 'rev_lyr' layer to the workspace
+            QgsProject.instance().addMapLayer(lyr)
+        layers = QgsProject.instance().mapLayersByName('rev_lyr')
+        # if multiple layers are present with name 'rev_lyr', selects first 'rev_lyr'
+        rev_lyr = layers[0]
+        rev_lyr.startEditing()
+        # get data provider of 'rev_lyr' layer so that new feature can be inserted
+        l_d = rev_lyr.dataProvider()
+        auth = NgisOpenApiClientAuthentication()
+        configId = self.dlg.mAuthConfigSelect.configId()
+        username, password = auth.getUser(configId)
+        client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
+        datasets = client.getAvailableDatasets()
+        metadata = client.getDatasetMetadata(datasets[0]['id'])
+        features = client.getDatasetFeatures(metadata.id, metadata.bbox, metadata.coordinate_reference_system)
+        hei = len(features['features'])
+        import json
+        features_json = json.dumps(features) 
+        codec = QTextCodec.codecForName("System")   
+        fields = QgsJsonUtils.stringToFields(features_json, codec)
+        newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
+        if newFeatures:                
+            print("It works")
+            # adds feature to the 'rev_lyr' layer
+            l_d.addFeatures(newFeatures)
+        # update the extent of rev_lyr
+        rev_lyr.updateExtents()
+        # save changes made in 'rev_lyr'
+        rev_lyr.commitChanges()
 
     def run(self):
         """Run method that performs all the real work"""
-
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
         if self.first_start == True:
             self.first_start = False
             self.dlg = NgisOpenApiClientDialog()
-
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
+        self.dlg.logInButton.clicked.connect(self.handle_login)
+        self.dlg.logOutButton.clicked.connect(self.handle_logout)
+        self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
+       
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:

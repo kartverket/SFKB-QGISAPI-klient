@@ -34,3 +34,4 @@ def classFactory(iface):  # pylint: disable=invalid-name
     #
     from .ngis_openapi_client import NgisOpenApiClient
     return NgisOpenApiClient(iface)
+    

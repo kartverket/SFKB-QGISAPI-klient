@@ -80,7 +80,7 @@ class NgisOpenApiClient:
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
         self.first_start = None
-
+        self.datasetDictionary = {}
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
         """Get the translation for a string using Qt translation API.
@@ -205,9 +205,13 @@ class NgisOpenApiClient:
         if len(datasets) == 0:
             self.dlg.statusLabel.setText("Kunne ikke hente datasett")
             return
+        
+        self.datasetDictionary = {dataset["name"]:dataset["id"] for dataset in datasets}
+        
         names = [dataset['name'] for dataset in datasets]
         self.dlg.mComboBox.addItems(names)
-        self.dlg.mComboBox.setDefaultText(names[0])
+
+        self.dlg.mComboBox.setEnabled(True)
         self.dlg.logInButton.setEnabled(False)
         self.dlg.logOutButton.setEnabled(True)
         self.dlg.addLayerButton.setEnabled(True)
@@ -215,12 +219,12 @@ class NgisOpenApiClient:
         return
 
     def handle_logout(self):
-        self.dlg.mComboBox.setDefaultText('')
         self.dlg.mComboBox.clear()
         self.dlg.logInButton.setEnabled(True)
         self.dlg.logOutButton.setEnabled(False)
         self.dlg.addLayerButton.setEnabled(False)
         self.dlg.mAuthConfigSelect.setEnabled(True)
+        self.dlg.mComboBox.setEnabled(False)
     
     def handle_add_layer(self):
         self.create_layer()
@@ -233,8 +237,9 @@ class NgisOpenApiClient:
         username, password = auth.getUser(configId)
         client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
 
-        datasets = client.getAvailableDatasets()
-        metadata = client.getDatasetMetadata(datasets[0]['id'])
+        selected_id = self.datasetDictionary[self.dlg.mComboBox.currentText()]
+
+        metadata = client.getDatasetMetadata(selected_id)
         features = client.getDatasetFeatures(metadata.id, metadata.bbox, metadata.coordinate_reference_system)
         
         features_json = json.dumps(features, ensure_ascii=False) 

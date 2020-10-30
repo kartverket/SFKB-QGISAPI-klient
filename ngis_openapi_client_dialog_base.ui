@@ -39,16 +39,6 @@
     </rect>
    </property>
   </widget>
-  <widget class="QgsCheckableComboBox" name="mComboBox">
-   <property name="geometry">
-    <rect>
-     <x>140</x>
-     <y>40</y>
-     <width>160</width>
-     <height>27</height>
-    </rect>
-   </property>
-  </widget>
   <widget class="QPushButton" name="logOutButton">
    <property name="enabled">
     <bool>false</bool>
@@ -74,7 +64,7 @@
      <x>310</x>
      <y>40</y>
      <width>111</width>
-     <height>28</height>
+     <height>31</height>
     </rect>
    </property>
    <property name="text">
@@ -100,17 +90,25 @@
     <enum>Qt::AutoText</enum>
    </property>
   </widget>
+  <widget class="QComboBox" name="mComboBox">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="geometry">
+    <rect>
+     <x>140</x>
+     <y>40</y>
+     <width>161</width>
+     <height>31</height>
+    </rect>
+   </property>
+  </widget>
  </widget>
  <customwidgets>
   <customwidget>
    <class>QgsAuthConfigSelect</class>
    <extends>QWidget</extends>
    <header>qgsauthconfigselect.h</header>
-  </customwidget>
-  <customwidget>
-   <class>QgsCheckableComboBox</class>
-   <extends>QComboBox</extends>
-   <header>qgscheckablecombobox.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

@@ -73,12 +73,12 @@
     <rect>
      <x>310</x>
      <y>40</y>
-     <width>93</width>
+     <width>111</width>
      <height>28</height>
     </rect>
    </property>
    <property name="text">
-    <string>Legg til i visning</string>
+    <string>Legg til lag</string>
    </property>
   </widget>
   <widget class="QLabel" name="statusLabel">

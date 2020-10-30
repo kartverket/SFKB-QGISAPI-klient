@@ -24,6 +24,7 @@
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+from qgis.utils import plugins
 from qgis.core import (
     QgsProject,
     QgsPathResolver,
@@ -280,16 +281,27 @@ class NgisOpenApiClient:
         if self.first_start == True:
             self.first_start = False
             self.dlg = NgisOpenApiClientDialog()
+            self.dlg.logInButton.clicked.connect(self.handle_login)
+            self.dlg.logOutButton.clicked.connect(self.handle_logout)
+            self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
-        self.dlg.logInButton.clicked.connect(self.handle_login)
-        self.dlg.logOutButton.clicked.connect(self.handle_logout)
-        self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
+        
        
+        '''
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
             pass
+        
+       
+        isrunning = plugins["ngis_openapi_client"]
+        if (isrunning.dlg):
+            if isrunning.dlg.isVisible():
+                isrunning.dlg.activateWindow()
+                return
+
+        '''

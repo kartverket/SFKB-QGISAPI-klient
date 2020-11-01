@@ -229,6 +229,13 @@ class NgisOpenApiClient:
     def handle_add_layer(self):
         self.create_layer()
 
+    def create_group(self, name):
+        root = QgsProject.instance().layerTreeRoot()
+        group = root.findGroup(name)
+        if not group:
+            group = root.addGroup(name)
+        return group
+
     def create_layer(self):
         """Create a new layer by name (rev_lyr)"""
 
@@ -237,7 +244,8 @@ class NgisOpenApiClient:
         username, password = auth.getUser(configId)
         client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
 
-        selected_id = self.datasetDictionary[self.dlg.mComboBox.currentText()]
+        selected_name = self.dlg.mComboBox.currentText()
+        selected_id = self.datasetDictionary[selected_name]
 
         metadata = client.getDatasetMetadata(selected_id)
         features = client.getDatasetFeatures(metadata.id, metadata.bbox, metadata.coordinate_reference_system)
@@ -246,6 +254,8 @@ class NgisOpenApiClient:
         codec = QTextCodec.codecForName("UTF-8")   
         fields = QgsJsonUtils.stringToFields(features_json, codec)
         newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
+
+        group = self.create_group(selected_name)
 
         geometry_dict = {}
         if newFeatures:   
@@ -264,7 +274,8 @@ class NgisOpenApiClient:
         for geom_type, feature_types in geometry_dict.items():
             for feature_type, features in feature_types.items():
                 lyr = QgsVectorLayer(f'{geom_type}?crs=epsg:4326', f'{feature_type}-{geom_type}', "memory")
-                QgsProject.instance().addMapLayer(lyr)
+                QgsProject.instance().addMapLayer(lyr, False)
+                
                 lyr.startEditing()
                 for field in fields:
                     addAttribute = lyr.addAttribute(field)
@@ -277,6 +288,9 @@ class NgisOpenApiClient:
                 lyr.updateExtents()
                 # save changes made in 'rev_lyr'
                 lyr.commitChanges()
+                group.addLayer(lyr)
+                
+           
 
     def run(self):
         """Run method that performs all the real work"""

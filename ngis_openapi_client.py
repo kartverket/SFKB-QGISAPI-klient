@@ -246,52 +246,69 @@ class NgisOpenApiClient:
 
         selected_name = self.dlg.mComboBox.currentText()
         selected_id = self.datasetDictionary[selected_name]
-
-        metadata = client.getDatasetMetadata(selected_id)
-        features = client.getDatasetFeatures(metadata.id, metadata.bbox, metadata.coordinate_reference_system)
         
-        features_json = json.dumps(features, ensure_ascii=False) 
-        codec = QTextCodec.codecForName("UTF-8")   
-        fields = QgsJsonUtils.stringToFields(features_json, codec)
-        newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
-
+        # Group name equals selected dataset name
         group = self.create_group(selected_name)
 
-        geometry_dict = {}
-        if newFeatures:   
-            for feature in newFeatures:
+        # Get metadata and features from NgisOpenAPI
+        metadata_from_api = client.getDatasetMetadata(selected_id)
+        features_from_api = client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, metadata_from_api.coordinate_reference_system)
+        crs_from_api = features_from_api['crs']['properties']['name']
+        features_by_type = {}
+        
+        # Extract features from GeoJSON into dictionary
+        for feature in features_from_api['features']:
+            feature_type = feature['properties']['featuretype']
+            features_by_type.setdefault(feature_type, []).append(feature)
+        
+        features_from_api['features'] = None
 
-                featuretype = feature.attribute('featuretype')
-                geom_type = feature.geometry()
-                geom_type = QgsWkbTypes.displayString(int(geom_type.wkbType()))
-                if geom_type not in geometry_dict:
-                    geometry_dict[geom_type] = {}
-                if featuretype not in geometry_dict[geom_type]:
-                    geometry_dict[geom_type][featuretype] = []
+        for feature_type, features_list in features_by_type.items():
+            # Create a new GeoJSON object containing a single featuretype
+            features_dict = features_from_api.copy()
+            features_dict['features'] = features_list
+
+            features_json = json.dumps(features_dict, ensure_ascii=False) 
+            
+            # Identify fields and features from GeoJSON
+            codec = QTextCodec.codecForName("UTF-8")   
+            fields = QgsJsonUtils.stringToFields(features_json, codec)
+            newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
+
+            # If different geometry types are identified, separate them into individual layers
+            geometry_dict = {}
+            if newFeatures:   
+                for feature in newFeatures:
+
+                    featuretype = feature.attribute('featuretype')
+                    geom_type = feature.geometry()
+                    geom_type = QgsWkbTypes.displayString(int(geom_type.wkbType()))
+                    if geom_type not in geometry_dict:
+                        geometry_dict[geom_type] = {}
+                    if featuretype not in geometry_dict[geom_type]:
+                        geometry_dict[geom_type][featuretype] = []
+                    
+                    geometry_dict[geom_type][featuretype].append(feature)
+
+            for geom_type, feature_types in geometry_dict.items():
+                for feature_type, features in feature_types.items():
+                    lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}', "memory")
+                    QgsProject.instance().addMapLayer(lyr, False)
+                    
+                    lyr.startEditing()
+                    for field in fields:
+                        addAttribute = lyr.addAttribute(field)
+                    # save changes made in 'rev_lyr'
+                    lyr.commitChanges()
+
+                    l_d = lyr.dataProvider()
+                    l_d.addFeatures(features)
+                    # update the extent of rev_lyr
+                    lyr.updateExtents()
+                    # save changes made in 'rev_lyr'
+                    lyr.commitChanges()
+                    group.addLayer(lyr)
                 
-                geometry_dict[geom_type][featuretype].append(feature)
-
-        for geom_type, feature_types in geometry_dict.items():
-            for feature_type, features in feature_types.items():
-                lyr = QgsVectorLayer(f'{geom_type}?crs=epsg:4326', f'{feature_type}-{geom_type}', "memory")
-                QgsProject.instance().addMapLayer(lyr, False)
-                
-                lyr.startEditing()
-                for field in fields:
-                    addAttribute = lyr.addAttribute(field)
-                # save changes made in 'rev_lyr'
-                lyr.commitChanges()
-
-                l_d = lyr.dataProvider()
-                l_d.addFeatures(features)
-                # update the extent of rev_lyr
-                lyr.updateExtents()
-                # save changes made in 'rev_lyr'
-                lyr.commitChanges()
-                group.addLayer(lyr)
-                
-           
-
     def run(self):
         """Run method that performs all the real work"""
         # Create the dialog with elements (after translation) and keep reference

@@ -1,1 +1,3 @@
 __pycache__/
+# ignore an entire directory
+/.vs/

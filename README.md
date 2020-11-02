@@ -1,3 +1,7 @@
+***In Progress***
+
+
+
 ### Plugin Builder Results
 
 Congratulations! You just built a plugin for QGIS!  
@@ -6,7 +10,7 @@ Congratulations! You just built a plugin for QGIS!
   **C:\Projects\Kartverket\NGIS Open API Client\ngis_openapi_client**
 
 Your QGIS plugin directory is located at:  
-  **C:/Users/username/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins**
+  **C:/Users/*username*/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins**
 
 ### What's Next
 

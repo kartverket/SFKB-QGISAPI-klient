@@ -6,11 +6,11 @@
 
 Congratulations! You just built a plugin for QGIS!  
 
-<div id="help" style="font-size:.9em;">Your plugin **NgisOpenApiClient** was created in:  
+Your plugin **NgisOpenApiClient** was created in:  
   **C:\Projects\Kartverket\NGIS Open API Client\ngis_openapi_client**
 
 Your QGIS plugin directory is located at:  
-  **C:/Users/*username*/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins**
+  **C:/Users/*<username\>*/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins**
 
 ### What's Next
 

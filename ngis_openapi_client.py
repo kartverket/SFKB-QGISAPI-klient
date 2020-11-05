@@ -81,6 +81,7 @@ class NgisOpenApiClient:
         # Must be set in initGui() to survive plugin reloads
         self.first_start = None
         self.datasetDictionary = {}
+        self.client = None
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
         """Get the translation for a string using Qt translation API.
@@ -200,8 +201,8 @@ class NgisOpenApiClient:
         if not username:
             self.dlg.statusLabel.setText("Autentisering mislyktes")
             return
-        client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
-        datasets = client.getAvailableDatasets()
+        self.client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
+        datasets = self.client.getAvailableDatasets()
         if len(datasets) == 0:
             self.dlg.statusLabel.setText("Kunne ikke hente datasett")
             return
@@ -225,6 +226,7 @@ class NgisOpenApiClient:
         self.dlg.addLayerButton.setEnabled(False)
         self.dlg.mAuthConfigSelect.setEnabled(True)
         self.dlg.mComboBox.setEnabled(False)
+        self.client = None
     
     def handle_add_layer(self):
         self.create_layer()
@@ -233,16 +235,11 @@ class NgisOpenApiClient:
         root = QgsProject.instance().layerTreeRoot()
         group = root.findGroup(name)
         if not group:
-            group = root.addGroup(name)
+            group = root.insertGroup(0, name)
         return group
 
     def create_layer(self):
         """Create a new layer by name (rev_lyr)"""
-
-        auth = NgisOpenApiClientAuthentication()
-        configId = self.dlg.mAuthConfigSelect.configId()
-        username, password = auth.getUser(configId)
-        client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
 
         selected_name = self.dlg.mComboBox.currentText()
         selected_id = self.datasetDictionary[selected_name]
@@ -251,8 +248,8 @@ class NgisOpenApiClient:
         group = self.create_group(selected_name)
 
         # Get metadata and features from NgisOpenAPI
-        metadata_from_api = client.getDatasetMetadata(selected_id)
-        features_from_api = client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, metadata_from_api.coordinate_reference_system)
+        metadata_from_api = self.client.getDatasetMetadata(selected_id)
+        features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, metadata_from_api.coordinate_reference_system)
         crs_from_api = features_from_api['crs']['properties']['name']
         features_by_type = {}
         

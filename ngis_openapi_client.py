@@ -313,7 +313,8 @@ class NgisOpenApiClient:
 
         if self.first_start == True:
             self.first_start = False
-            self.dlg = NgisOpenApiClientDialog()
+            #keep a modeless dialog window on top of the main QGIS window.
+            self.dlg = NgisOpenApiClientDialog(self.iface.mainWindow())
             self.dlg.logInButton.clicked.connect(self.handle_login)
             self.dlg.logOutButton.clicked.connect(self.handle_logout)
             self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)

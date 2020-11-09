@@ -44,6 +44,9 @@ class NgisHttpClient:
         except ApiException as e:
             print("Exception when calling FeaturesApi->get_dataset_feature: %s\n" % e)
 
+    def createDatasetFeatures(self, dataset_id, body):
+        return_data, status, headers = self.features_api_instance.update_dataset_features_with_http_info(body, self.x_client_product_version, dataset_id)
+
     def getDatasetFeatures(self, dataset_id, bbox, crs_epsg, limit=None):
         try:
             bbox = bbox['ll']+bbox['ur']

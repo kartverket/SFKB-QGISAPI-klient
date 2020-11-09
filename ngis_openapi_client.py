@@ -32,7 +32,10 @@ from qgis.core import (
     QgsOgcUtils,
     QgsFeature,
     QgsJsonUtils,
-    QgsWkbTypes
+    QgsJsonExporter,
+    QgsAuthManager,
+    QgsWkbTypes,
+    QgsSettings
 )
 
 import json
@@ -80,7 +83,9 @@ class NgisOpenApiClient:
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
         self.first_start = None
-        self.datasetDictionary = {}
+        self.dataset_dictionary = {}
+        self.feature_type_dictionary = {}
+        self.layer_dictionary = {}
         self.client = None
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -207,7 +212,7 @@ class NgisOpenApiClient:
             self.dlg.statusLabel.setText("Kunne ikke hente datasett")
             return
         
-        self.datasetDictionary = {dataset["name"]:dataset["id"] for dataset in datasets}
+        self.dataset_dictionary = {dataset["name"]:dataset["id"] for dataset in datasets}
         
         names = [dataset['name'] for dataset in datasets]
         self.dlg.mComboBox.addItems(names)
@@ -217,6 +222,8 @@ class NgisOpenApiClient:
         self.dlg.logOutButton.setEnabled(True)
         self.dlg.addLayerButton.setEnabled(True)
         self.dlg.mAuthConfigSelect.setEnabled(False)
+        s = QgsSettings()
+        s.setValue("ngisopenapi/auth_method_id", configId)
         return
 
     def handle_logout(self):
@@ -242,14 +249,20 @@ class NgisOpenApiClient:
         """Create a new layer by name (rev_lyr)"""
 
         selected_name = self.dlg.mComboBox.currentText()
-        selected_id = self.datasetDictionary[selected_name]
+        selected_id = self.dataset_dictionary[selected_name]
         
         # Group name equals selected dataset name
         group = self.create_group(selected_name)
 
         # Get metadata and features from NgisOpenAPI
         metadata_from_api = self.client.getDatasetMetadata(selected_id)
-        features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, metadata_from_api.coordinate_reference_system)
+        epsg = metadata_from_api.coordinate_reference_system
+        epsg_location = epsg.lower().find("epsg:")
+        if (epsg_location == 0):
+            epsg = epsg[5:]
+
+        #TODO REMOVE
+        features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
         crs_from_api = features_from_api['crs']['properties']['name']
         features_by_type = {}
         
@@ -289,12 +302,14 @@ class NgisOpenApiClient:
 
             for geom_type, feature_types in geometry_dict.items():
                 for feature_type, features in feature_types.items():
-                    lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}', "memory")
+                    #lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}', "memory")
+                    lyr = QgsVectorLayer(f'{geom_type}?crs=EPSG:25832', f'{feature_type}-{geom_type}', "memory") #TODO Remove
                     QgsProject.instance().addMapLayer(lyr, False)
                     
                     lyr.startEditing()
                     for field in fields:
                         addAttribute = lyr.addAttribute(field)
+                        type = field.type()
                     # save changes made in 'rev_lyr'
                     lyr.commitChanges()
 
@@ -305,7 +320,35 @@ class NgisOpenApiClient:
                     # save changes made in 'rev_lyr'
                     lyr.commitChanges()
                     group.addLayer(lyr)
-                
+
+                    lyr.featureAdded.connect(self.aa)
+                    lyr.committedFeaturesAdded.connect(self.bb)
+                    self.dataset_dictionary[lyr.id()] = selected_id
+                    self.feature_type_dictionary[lyr.id()] = feature_type
+
+    def aa(self, ide):
+        print(ide)
+        lyr = self.iface.activeLayer()
+        feature = lyr.getFeature(ide)
+        renderer = lyr.renderer()
+        print("Type:", renderer.type())
+        print(feature)
+        
+
+    def bb(self, layerId , addedFeatures ):
+        print(layerId, addedFeatures)
+
+        lyr = QgsProject.instance().mapLayer(layerId)
+        export = QgsJsonExporter(lyr)
+        features_json = export.exportFeatures(addedFeatures)
+        json_dict = json.loads(features_json)
+        for feature in json_dict['features']:
+            feature['properties']['update'] = {"action":"Create"}
+            feature['properties']['featuretype'] = self.feature_type_dictionary[lyr.id()]
+            del feature['properties']['UNLOCODE']
+        #json_dump = json.dumps(json_dict, ensure_ascii=False)
+        self.client.createDatasetFeatures(self.dataset_dictionary[lyr.id()], json_dict)
+
     def run(self):
         """Run method that performs all the real work"""
         # Create the dialog with elements (after translation) and keep reference
@@ -313,8 +356,11 @@ class NgisOpenApiClient:
 
         if self.first_start == True:
             self.first_start = False
+            s = QgsSettings()
+            auth_method_id = s.value("ngisopenapi/auth_method_id", "")
             #keep a modeless dialog window on top of the main QGIS window.
             self.dlg = NgisOpenApiClientDialog(self.iface.mainWindow())
+            self.dlg.mAuthConfigSelect.setConfigId(auth_method_id)
             self.dlg.logInButton.clicked.connect(self.handle_login)
             self.dlg.logOutButton.clicked.connect(self.handle_logout)
             self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)

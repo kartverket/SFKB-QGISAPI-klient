@@ -457,7 +457,7 @@ class ApiClient(object):
         if not accepts:
             return
 
-        accepts = [x.lower() for x in accepts]
+        #accepts = [x.lower() for x in accepts]
 
         if 'application/json' in accepts:
             return 'application/json'

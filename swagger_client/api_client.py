@@ -64,6 +64,7 @@ class ApiClient(object):
         if configuration is None:
             configuration = Configuration()
         self.configuration = configuration
+
         self.pool = ThreadPool()
         self.rest_client = rest.RESTClientObject(configuration)
         self.default_headers = {}
@@ -457,7 +458,7 @@ class ApiClient(object):
         if not accepts:
             return
 
-        #accepts = [x.lower() for x in accepts]
+        accepts = [x.lower() for x in accepts]
 
         if 'application/json' in accepts:
             return 'application/json'

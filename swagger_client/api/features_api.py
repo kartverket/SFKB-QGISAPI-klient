@@ -138,7 +138,7 @@ class FeaturesApi(object):
         body_params = None
         # HTTP header `Accept`
         header_params['Accept'] = self.api_client.select_header_accept(
-            ['application/vnd.kartverket.sosi+json;crs_EPSG=25832'])  # noqa: E501
+            ['application/vnd.kartverket.sosi+gml; version=1.0', 'application/vnd.kartverket.sosi+json; version=1.0'])  # noqa: E501
 
         # Authentication setting
         auth_settings = ['basicAuth']  # noqa: E501
@@ -372,7 +372,7 @@ class FeaturesApi(object):
         body_params = None
         # HTTP header `Accept`
         header_params['Accept'] = self.api_client.select_header_accept(
-            ['application/vnd.kartverket.sosi+json;crs_EPSG=25832'])  # noqa: E501
+            ['application/vnd.kartverket.sosi+gml; version=1.0', 'application/vnd.kartverket.sosi+json; version=1.0'])  # noqa: E501
 
         # Authentication setting
         auth_settings = ['basicAuth']  # noqa: E501
@@ -606,7 +606,7 @@ class FeaturesApi(object):
 
         # HTTP header `Content-Type`
         header_params['Content-Type'] = self.api_client.select_header_content_type(  # noqa: E501
-            ['application/vnd.kartverket.sosi+json; version=1.0'])  # noqa: E501
+            ['application/vnd.kartverket.sosi+wfs-t; version=1.0', 'application/vnd.kartverket.sosi+json; version=1.0'])  # noqa: E501
 
         # Authentication setting
         auth_settings = ['basicAuth']  # noqa: E501

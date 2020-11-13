@@ -114,7 +114,7 @@ class MetadataApi(object):
         body_params = None
         # HTTP header `Accept`
         header_params['Accept'] = self.api_client.select_header_accept(
-            ['application/vnd.kartverket.ngis.dataset+json'])  # noqa: E501
+            ['application/vnd.kartverket.ngis.dataset+json', 'application/vnd.kartverket.ngis.dataset+json; crs_EPSG=5972', 'application/vnd.kartverket.ngis.dataset+json; crs_EPSG=5973'])  # noqa: E501
 
         # Authentication setting
         auth_settings = ['basicAuth']  # noqa: E501

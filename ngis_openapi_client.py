@@ -480,7 +480,7 @@ class NgisOpenApiClient:
                 'calendar_popup': True,
                 'display_format': 'yyyy-MM-dd',
                 'field_format': 'yyyy-MM-dd',
-                'field_iso_format': False
+                'field_iso_format': True
                 }
         field_type = 'DateTime'
         widget_setup = QgsEditorWidgetSetup(field_type, config)
@@ -500,13 +500,20 @@ class NgisOpenApiClient:
 
         if layer.editBuffer():
             ids_deleted = layer.editBuffer().deletedFeatureIds()
-            features_deleted = layer.dataProvider().getFeatures( QgsFeatureRequest().setFilterFids(ids_deleted))
+            features_deleted = layer.dataProvider().getFeatures(QgsFeatureRequest().setFilterFids(ids_deleted))
             features_added = layer.editBuffer().addedFeatures()
             changed_geometries = layer.editBuffer().changedGeometries()
+            changed_attribute_values = layer.editBuffer().changedAttributeValues()
+
+            features = []
+            features = features + self.handleCommittedFeaturesRemoved(layer, features_deleted)
+            features = features + self.handleCommitedAddedFeatures(layer, features_added)
+            features = features + self.handleCommittedGeometriesChanged(layer, changed_geometries)
+            features = features + self.handleChangedAttributeValues(layer, changed_attribute_values)
+
+            #TODO Handle if both geometry and attributes changes
             
-            self.handleCommittedFeaturesRemoved(layer, features_deleted)
-            self.handleCommitedAddedFeatures(layer, features_added)
-            self.handleCommittedGeometriesChanged(layer, changed_geometries)
+            self.handleAlteredFeatures(layer, features)
 
     def createCrsEntry(self, epsg):
         return {
@@ -524,9 +531,71 @@ class NgisOpenApiClient:
             code = authid[epsg_tag_idx+5:]
             return code
 
+    def is_json(self, myjson):
+        try:
+            json_object = json.loads(myjson)
+        except ValueError as e:
+            return False
+        return True
+
+    def handleChangedAttributeValues(self, lyr, changed_attribute_values):
+        
+        features = []
+        for fid, attributes in changed_attribute_values.items():
+            changed_feature = lyr.getFeature(fid)
+            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+            datasetid = self.dataset_dictionary[lyr.id()]
+            crs = lyr.crs().authid()
+            crs_epsg = self.authidToCode(crs)
+            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            
+            for attribute_idx, attribute in attributes.items():
+                attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
+                attribute_value = json.loads(attribute) if self.is_json(attribute) else attribute
+                updated = {attribute_name : attribute_value}
+                feature_with_lock["features"][0]["properties"].update(updated)
+            
+            feature_with_lock["features"][0]['update'] = {'action': 'Replace'}
+            features = features + feature_with_lock["features"]
+        return features
+    
+    def handleCommittedGeometriesChanged(self, lyr, changed_features):
+        
+        features = []
+        for fid, geometry in changed_features.items():
+            changed_feature = lyr.getFeature(fid)
+
+            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+            datasetid = self.dataset_dictionary[lyr.id()]
+            crs = lyr.crs().authid()
+            crs_epsg = self.authidToCode(crs)
+            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+
+            feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
+            
+            feature_with_lock['features'][0]['update'] = {'action': 'Replace'}
+            features = features + feature_with_lock["features"]
+        return features
+    
+    def handleCommittedFeaturesRemoved(self, lyr, deleted_features):
+        
+        features = []
+        for deleted_feature in deleted_features:
+            
+            lokalid = json.loads(deleted_feature.attribute('identifikasjon'))["lokalId"]
+            datasetid = self.dataset_dictionary[lyr.id()]
+            crs = lyr.crs().authid()
+            crs_epsg = self.authidToCode(crs)
+            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+
+            feature_with_lock['features'][0]['update'] = {'action': 'Erase'}
+            features = features + feature_with_lock["features"]
+        return features
+
     def handleCommitedAddedFeatures(self, lyr, addedFeatures):
         
-        if len(addedFeatures) == 0: return
+        features = []
+        if len(addedFeatures) == 0: return features
 
         crs = lyr.crs().authid()
         crs_epsg = self.authidToCode(crs)
@@ -537,6 +606,7 @@ class NgisOpenApiClient:
         features_json = export.exportFeatures(addedFeatures.values())
         json_dict = json.loads(features_json)
         json_dict.update(self.createCrsEntry(crs))
+
         for feature in json_dict['features']:
             prop_for_deletion = []
             for prop in feature['properties']:
@@ -548,11 +618,24 @@ class NgisOpenApiClient:
             feature['properties']['identifikasjon'] = json.loads(feature['properties']['identifikasjon'])
             feature['properties']['identifikasjon']["lokalId"] = str(uuid.uuid4())
 
+            #TODO Better handling of null values
             for prop in prop_for_deletion:
                 del feature['properties'][prop]
+            
             feature['update'] = {"action":"Create"}
-
+            features.append(feature)
+        return features
+    
+    def handleAlteredFeatures(self, lyr, features):
+       
         try:
+            json_dict = {"type": "FeatureCollection", "features" : None, "crs" : None}
+            
+            crs = lyr.crs().authid()
+            crs_epsg = self.authidToCode(crs)
+            json_dict.update(self.createCrsEntry(crs))
+            json_dict['features'] = features
+
             datasetid = self.dataset_dictionary[lyr.id()]
             return_data = self.client.updateDatasetFeature(datasetid, crs_epsg, json_dict)
             self.iface.messageBar().pushMessage("Success", "Endringene er lagret", str(return_data), level=3, duration=10)
@@ -570,62 +653,6 @@ class NgisOpenApiClient:
             except:
                 pass
             self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
-    
-    def handleCommittedGeometriesChanged(self, lyr, changed_features):
-        for fid, geometry in changed_features.items():
-            changed_feature = lyr.getFeature(fid)
-
-            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
-            datasetid = self.dataset_dictionary[lyr.id()]
-            crs = lyr.crs().authid()
-            crs_epsg = self.authidToCode(crs)
-            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
-
-            feature_with_lock.get('features')[0]['update'] = {'action': 'Replace'}
-            feature_with_lock.get('features')[0]['geometry'] = json.loads(geometry.asJson())
-
-            try:
-                return_data = self.client.updateDatasetFeature(datasetid, crs_epsg, feature_with_lock)
-                self.iface.messageBar().pushMessage("Success", "Objektene ble oppdatert", str(return_data), level=3, duration=10)
-            except Exception as e:
-                title = "Oppdatering mislyktes"
-                text = "Kunne ikke oppdatere alle objekt"
-                show_more = str(e)
-                try:
-                    error_object = json.loads(e.body)
-                    title = error_object['title'] if 'title' in error_object else None
-                    text = error_object["detail"] if 'detail' in error_object else None
-                    show_more = str(error_object["errors"]) if 'errors' in error_object else None
-                except:
-                    pass
-                self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
-
-    def handleCommittedFeaturesRemoved(self, lyr, deleted_features):
-        
-        for deleted_feature in deleted_features:
-            
-            lokalid = json.loads(deleted_feature.attribute('identifikasjon'))["lokalId"]
-            datasetid = self.dataset_dictionary[lyr.id()]
-            crs = lyr.crs().authid()
-            crs_epsg = self.authidToCode(crs)
-            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
-
-            feature_with_lock.get('features')[0]['update'] = {'action': 'Erase'}
-            try:
-                return_data = self.client.updateDatasetFeature(datasetid, crs_epsg, feature_with_lock)
-                self.iface.messageBar().pushMessage("Success", "Objektene ble slettet", str(return_data), level=3, duration=10)
-            except Exception as e:
-                title = "Sletting mislyktes"
-                text = "Kunne ikke slette alle objekt"
-                show_more = str(e)
-                try:
-                    error_object = json.loads(e.body)
-                    title = error_object['title'] if 'title' in error_object else None
-                    text = error_object["detail"] if 'detail' in error_object else None
-                    show_more = str(error_object["errors"]) if 'errors' in error_object else None
-                except:
-                    pass
-                self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
 
     def run(self):
         """Run method that performs all the real work"""

@@ -508,10 +508,7 @@ class NgisOpenApiClient:
             features = []
             features = features + self.handleCommittedFeaturesRemoved(layer, features_deleted)
             features = features + self.handleCommitedAddedFeatures(layer, features_added)
-            features = features + self.handleCommittedGeometriesChanged(layer, changed_geometries)
-            features = features + self.handleChangedAttributeValues(layer, changed_attribute_values)
-
-            #TODO Handle if both geometry and attributes changes
+            features = features + self.handleChangedValues(layer, changed_attribute_values, changed_geometries, ids_deleted)
             
             self.handleAlteredFeatures(layer, features)
 
@@ -538,16 +535,23 @@ class NgisOpenApiClient:
             return False
         return True
 
-    def handleChangedAttributeValues(self, lyr, changed_attribute_values):
+    def lockFeature(self, lyr, changed_feature):
+        lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+        datasetid = self.dataset_dictionary[lyr.id()]
+        crs = lyr.crs().authid()
+        crs_epsg = self.authidToCode(crs)
+        feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+        return feature_with_lock
+
+    def handleChangedValues(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
         
         features = []
         for fid, attributes in changed_attribute_values.items():
+            
+            if fid in ids_deleted: continue
+
             changed_feature = lyr.getFeature(fid)
-            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
-            datasetid = self.dataset_dictionary[lyr.id()]
-            crs = lyr.crs().authid()
-            crs_epsg = self.authidToCode(crs)
-            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            feature_with_lock = self.lockFeature(lyr, changed_feature)
             
             for attribute_idx, attribute in attributes.items():
                 attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
@@ -555,38 +559,34 @@ class NgisOpenApiClient:
                 updated = {attribute_name : attribute_value}
                 feature_with_lock["features"][0]["properties"].update(updated)
             
+            if fid in changed_geometries:
+                geometry = changed_geometries[fid]
+                feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
+                changed_geometries.pop(fid)
+
             feature_with_lock["features"][0]['update'] = {'action': 'Replace'}
             features = features + feature_with_lock["features"]
-        return features
-    
-    def handleCommittedGeometriesChanged(self, lyr, changed_features):
         
-        features = []
-        for fid, geometry in changed_features.items():
-            changed_feature = lyr.getFeature(fid)
+        for fid, geometry in changed_geometries.items():
+            
+            if fid in ids_deleted: continue
 
-            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
-            datasetid = self.dataset_dictionary[lyr.id()]
-            crs = lyr.crs().authid()
-            crs_epsg = self.authidToCode(crs)
-            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            changed_feature = lyr.getFeature(fid)
+            feature_with_lock = self.lockFeature(lyr, changed_feature)
 
             feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
             
             feature_with_lock['features'][0]['update'] = {'action': 'Replace'}
             features = features + feature_with_lock["features"]
+        
         return features
-    
+
     def handleCommittedFeaturesRemoved(self, lyr, deleted_features):
         
         features = []
         for deleted_feature in deleted_features:
             
-            lokalid = json.loads(deleted_feature.attribute('identifikasjon'))["lokalId"]
-            datasetid = self.dataset_dictionary[lyr.id()]
-            crs = lyr.crs().authid()
-            crs_epsg = self.authidToCode(crs)
-            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            feature_with_lock = self.lockFeature(lyr, deleted_feature)
 
             feature_with_lock['features'][0]['update'] = {'action': 'Erase'}
             features = features + feature_with_lock["features"]

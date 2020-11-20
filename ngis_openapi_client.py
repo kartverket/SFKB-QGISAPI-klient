@@ -528,20 +528,33 @@ class NgisOpenApiClient:
             code = authid[epsg_tag_idx+5:]
             return code
 
-    def is_json(self, myjson):
+    def tryParseJson(self, myjson):
         try:
             json_object = json.loads(myjson)
-        except ValueError as e:
-            return False
-        return True
+            return json_object
+        except Exception:
+            return myjson
 
     def lockFeature(self, lyr, changed_feature):
         lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
         datasetid = self.dataset_dictionary[lyr.id()]
         crs = lyr.crs().authid()
         crs_epsg = self.authidToCode(crs)
-        feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
-        return feature_with_lock
+        try:
+            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            return feature_with_lock
+        except Exception as e:
+            title = "Låsing mislyktes"
+            text = "Kunne ikke låse feature"
+            show_more = str(e)
+            try:
+                error_object = json.loads(e.body)
+                title = error_object['title'] if 'title' in error_object else None
+                text = error_object["detail"] if 'detail' in error_object else None
+                show_more = str(error_object["errors"]) if 'errors' in error_object else None
+            except:
+                pass
+            self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
 
     def handleChangedValues(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
         
@@ -555,7 +568,7 @@ class NgisOpenApiClient:
             
             for attribute_idx, attribute in attributes.items():
                 attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
-                attribute_value = json.loads(attribute) if self.is_json(attribute) else attribute
+                attribute_value = self.tryParseJson(attribute)
                 updated = {attribute_name : attribute_value}
                 feature_with_lock["features"][0]["properties"].update(updated)
             
@@ -593,38 +606,39 @@ class NgisOpenApiClient:
         return features
 
     def handleCommitedAddedFeatures(self, lyr, addedFeatures):
-        
         features = []
-        if len(addedFeatures) == 0: return features
-
-        crs = lyr.crs().authid()
-        crs_epsg = self.authidToCode(crs)
-
-        export = QgsJsonExporter(lyr)
-
-        export.setSourceCrs(QgsCoordinateReferenceSystem())
-        features_json = export.exportFeatures(addedFeatures.values())
-        json_dict = json.loads(features_json)
-        json_dict.update(self.createCrsEntry(crs))
-
-        for feature in json_dict['features']:
-            prop_for_deletion = []
-            for prop in feature['properties']:
-                if not feature['properties'][prop]:
-                    prop_for_deletion.append(prop)
-
-            feature['properties']['featuretype'] = self.feature_type_dictionary[lyr.id()]
-            feature['properties']['kvalitet'] = json.loads(feature['properties']['kvalitet'])
-            feature['properties']['identifikasjon'] = json.loads(feature['properties']['identifikasjon'])
-            feature['properties']['identifikasjon']["lokalId"] = str(uuid.uuid4())
-
-            #TODO Better handling of null values
-            for prop in prop_for_deletion:
-                del feature['properties'][prop]
+        for fid, feature in addedFeatures.items():
             
-            feature['update'] = {"action":"Create"}
-            features.append(feature)
+            export = QgsJsonExporter(lyr)
+            export.setSourceCrs(QgsCoordinateReferenceSystem())
+            
+            identifikasjon_idx = feature.fieldNameIndex('identifikasjon')
+            identifikasjon_value = json.loads(feature.attribute('identifikasjon'))
+            identifikasjon_value["lokalId"] = str(uuid.uuid4())
+            feature.setAttribute('identifikasjon', identifikasjon_value)
+
+            feature.setAttribute('featuretype', self.feature_type_dictionary[lyr.id()])
+            feature_json = json.loads(export.exportFeature(feature))
+            
+            # Don't include null values in json, Ngis open API doesn't like it
+            prop_for_deletion = []
+            for property_name, property_value in feature_json['properties'].items():
+                if not property_value:
+                    prop_for_deletion.append(property_name)
+                else:
+                    feature_json['properties'][property_name] = self.tryParseJson(property_value)
+            for prop in prop_for_deletion:
+                del feature_json['properties'][prop]
+            
+            feature_json['update'] = {"action":"Create"}
+            features.append(feature_json)
+
+            # Update QGIS layer with new uuid, must be string (not json)
+            feature.setAttribute('identifikasjon', json.dumps(identifikasjon_value))
+            lyr.updateFeature(feature)
+
         return features
+
     
     def handleAlteredFeatures(self, lyr, features):
        

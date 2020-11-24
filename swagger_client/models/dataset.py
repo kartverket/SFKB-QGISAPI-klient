@@ -3,7 +3,7 @@
 """
     Oppdateringsgrensesnitt for SFKB
 
-    # NGIS-OpenAPI  Grov oversikt over funksjonalitet:   - Hente liste over tilgjengelige datasett    - Hente metadata for et bestemt datasett   - Hente data fra et bestemt datasett     - Med lesetilgang eller skrivetilgang (medfører låsing)       - områdebegrensning       - egenskapsspørring (begrenset i første versjon til bygningsnummer eller lokalid)   - Lagre data til et bestemt datasett     - Operasjoner som håndteres: nytt objekt, endre objekt og slett objekt  ## Generelle prinsipper for systemet  ### Delt geometri  Flater består av avgrensningslinjer som ligger lagret som egne objekter. På den måten kan en linje avgrense ingen, én eller flere flater. Det er likevel slik at flater hentes ut og lagres med egen geometri for å gjøre det enklere å tegne opp datene, men ved endring av (delte) linjer og flater må det tas hensyn til delt geometri. Forsøk på endring av linje eller flate uten tilsvarende endring av evt. delt geometri vil bli avvist av systemet.  ### Låsing  Dette er nærmere beskrevet i de aktuelle kallene.  Foreløpig er det kun `user_lock` som er støttet. Det betyr at data må hentes ut med `user_lock` før de kan sendes inn med endringer.  ### Porsjonering  All uthenting av feature-objekter vil kunne bli porsjonert av serveren, se `limit`-parameteret.   ### Koordinatsystemer og transformasjon  For å sende inn koordinater i uri-spørringen (f.eks med `bbox`-parameteret) må koordinatsystemet angis med `crs_EPSG`-parameteret.  For å hente ut koordinater på annet koordinatsystem enn i dataset'et kan ønsket koordinatsystem angis i `Accept`-headeren med `crs_EPSG`. Se eksempler på dette i kallene.   # noqa: E501
+    # NGIS-OpenAPI  Grov oversikt over funksjonalitet:   - Hente liste over tilgjengelige datasett    - Hente metadata for et bestemt datasett   - Hente data fra et bestemt datasett     - Med lesetilgang eller skrivetilgang (medfører låsing)       - områdebegrensning       - egenskapsspørring (begrenset i første versjon til bygningsnummer eller lokalid)   - Lagre data til et bestemt datasett     - Operasjoner som håndteres: nytt objekt, endre objekt og slett objekt  ## Generelle prinsipper for systemet  ### Delt geometri  Flater består av avgrensningslinjer som ligger lagret som egne objekter. På den måten kan en linje avgrense ingen, én eller flere flater. Det er likevel slik at flater hentes ut og lagres med egen geometri for å gjøre det enklere å tegne opp datene, men ved endring av (delte) linjer og flater må det tas hensyn til delt geometri. Forsøk på endring av linje eller flate uten tilsvarende endring av evt. delt geometri vil bli avvist av systemet.  ### Låsing  Dette er nærmere beskrevet i de aktuelle kallene.  Foreløpig er det kun `user_lock` som er støttet. Det betyr at data må hentes ut med `user_lock` før de kan sendes inn med endringer.  ### Porsjonering  All uthenting av feature-objekter vil kunne bli porsjonert av serveren, se `limit`-parameteret.   ### Koordinatsystemer og transformasjon  Dersom annet koordinatsystem enn det som ligger i dataset skal brukes (se `GET /datasets/{datasetId}`) må koordinatsystem angis med `crs_EPSG`-parameteret. Dette styrer data som sendes inn, data som hentes ut og koordinatsystemet i `bbox`-parameteret i kallet. For å bytte rekkefølge på aksene brukes `crs_normalized_for_visualization`-parameteret.   # noqa: E501
 
     OpenAPI spec version: 1.0.0
     
@@ -32,7 +32,7 @@ class Dataset(object):
         'name': 'str',
         'description': 'str',
         'resolution': 'float',
-        'coordinate_reference_system': 'str',
+        'crs_epsg': 'int',
         'schema_url': 'str',
         'access': 'str',
         'bbox': 'BoundingBox'
@@ -43,19 +43,19 @@ class Dataset(object):
         'name': 'name',
         'description': 'description',
         'resolution': 'resolution',
-        'coordinate_reference_system': 'coordinate_reference_system',
+        'crs_epsg': 'crs_EPSG',
         'schema_url': 'schema_url',
         'access': 'access',
         'bbox': 'bbox'
     }
 
-    def __init__(self, id=None, name=None, description=None, resolution=None, coordinate_reference_system=None, schema_url=None, access=None, bbox=None):  # noqa: E501
+    def __init__(self, id=None, name=None, description=None, resolution=None, crs_epsg=None, schema_url=None, access=None, bbox=None):  # noqa: E501
         """Dataset - a model defined in Swagger"""  # noqa: E501
         self._id = None
         self._name = None
         self._description = None
         self._resolution = None
-        self._coordinate_reference_system = None
+        self._crs_epsg = None
         self._schema_url = None
         self._access = None
         self._bbox = None
@@ -68,8 +68,8 @@ class Dataset(object):
             self.description = description
         if resolution is not None:
             self.resolution = resolution
-        if coordinate_reference_system is not None:
-            self.coordinate_reference_system = coordinate_reference_system
+        if crs_epsg is not None:
+            self.crs_epsg = crs_epsg
         if schema_url is not None:
             self.schema_url = schema_url
         if access is not None:
@@ -162,25 +162,25 @@ class Dataset(object):
         self._resolution = resolution
 
     @property
-    def coordinate_reference_system(self):
-        """Gets the coordinate_reference_system of this Dataset.  # noqa: E501
+    def crs_epsg(self):
+        """Gets the crs_epsg of this Dataset.  # noqa: E501
 
 
-        :return: The coordinate_reference_system of this Dataset.  # noqa: E501
-        :rtype: str
+        :return: The crs_epsg of this Dataset.  # noqa: E501
+        :rtype: int
         """
-        return self._coordinate_reference_system
+        return self._crs_epsg
 
-    @coordinate_reference_system.setter
-    def coordinate_reference_system(self, coordinate_reference_system):
-        """Sets the coordinate_reference_system of this Dataset.
+    @crs_epsg.setter
+    def crs_epsg(self, crs_epsg):
+        """Sets the crs_epsg of this Dataset.
 
 
-        :param coordinate_reference_system: The coordinate_reference_system of this Dataset.  # noqa: E501
-        :type: str
+        :param crs_epsg: The crs_epsg of this Dataset.  # noqa: E501
+        :type: int
         """
 
-        self._coordinate_reference_system = coordinate_reference_system
+        self._crs_epsg = crs_epsg
 
     @property
     def schema_url(self):

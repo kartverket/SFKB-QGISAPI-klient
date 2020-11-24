@@ -23,7 +23,7 @@
 """
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox
 from qgis.utils import plugins
 from qgis.core import (
     QgsProject,
@@ -35,10 +35,17 @@ from qgis.core import (
     QgsJsonExporter,
     QgsAuthManager,
     QgsWkbTypes,
-    QgsSettings
+    QgsSettings,
+    QgsDefaultValue,
+    QgsFieldConstraints,
+    QgsEditorWidgetSetup,
+    QgsCoordinateReferenceSystem,
+    QgsMessageLog,
+    QgsFeatureRequest
 )
 
 import json
+import uuid
 from .login import NgisOpenApiClientAuthentication
 from .http_client import NgisHttpClient
 
@@ -87,6 +94,99 @@ class NgisOpenApiClient:
         self.feature_type_dictionary = {}
         self.layer_dictionary = {}
         self.client = None
+    def getSchemaDefinition(self):
+        return {
+            "Vanntilkobling" : {
+                "featuretype":{
+                    "read_only" : True
+                },
+                "datafangstdato": {
+                    "type" : "datetime"
+                },
+                "havneident": {
+                    "not_null" : True,
+                    "default" : "havn"
+                },
+                "kaiident": {
+                    "not_null" : True,
+                    "default" : "kai"
+                },
+                "oppdateringsdato": {
+                    "type" : "datetime"
+                },
+                "informasjon": {
+                    "not_null" : False,
+                },
+                "UNLOCODE": {
+                    "not_null" : True,
+                    "default" : "NOIS"
+                },
+                "vanntilkobling": {
+                    "enum" : ["ferskvann", "saltvann"],
+                    "not_null" : True,
+                    "default" : "ferskvann"
+                },
+                "identifikasjon": {
+                    "read_only" : True,
+                    "default" : f'{{ "navnerom": "data.geonorge.no/havnedata/so", "lokalId": "", "versjonId": "2020-10-26 11:10:36.246000" }}'
+                },
+                "kvalitet": {
+                    "not_null" : True,
+                    "default" : '{ "målemetode": "10", "nøyaktighet": 10, "synbarhet": "1", "målemetodeHøyde": "10", "nøyaktighetHøyde": 10 }'
+                },
+                "høydereferanse": {
+                    "not_null" : True,
+                    "default" : 'ukjent'
+                },
+                "link": {
+                    "not_null" : True,
+                    "default" : 'x'
+                },
+                "kumnummer": {
+                    "not_null" : True,
+                    "default" : 2,
+                    "type" : "numeric"
+                },
+            },
+            "Havnegjerde" : {
+                "featuretype":{
+                    "read_only" : True
+                },
+                "datafangstdato": {
+                    "type" : "datetime"
+                },
+                "havneident": {
+                    "not_null" : True,
+                    "default" : "havn"
+                },
+                "oppdateringsdato": {
+                    "type" : "datetime"
+                },
+                "informasjon": {
+                    "not_null" : False,
+                },
+                "identifikasjon": {
+                    "read_only" : True,
+                    "default" : f'{{ "navnerom": "data.geonorge.no/havnedata/so", "lokalId": "", "versjonId": "2020-10-26 11:10:36.246000" }}'
+                },
+                "kvalitet": {
+                    "not_null" : True,
+                    "default" : '{ "målemetode": "10", "nøyaktighet": 10, "synbarhet": "1", "målemetodeHøyde": "10", "nøyaktighetHøyde": 10 }'
+                },
+                 "UNLOCODE": {
+                    "not_null" : True,
+                    "default" : "NOIS"
+                },
+                "høydereferanse": {
+                    "not_null" : True,
+                    "default" : 'ukjent'
+                },
+                "link": {
+                    "not_null" : True,
+                    "default" : 'x'
+                }
+            }
+        }
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
         """Get the translation for a string using Qt translation API.
@@ -207,6 +307,8 @@ class NgisOpenApiClient:
             self.dlg.statusLabel.setText("Autentisering mislyktes")
             return
         self.client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
+        #self.client = NgisHttpClient("https://qmsrest.westeurope.cloudapp.azure.com:8080/v1/", username, password)
+
         datasets = self.client.getAvailableDatasets()
         if len(datasets) == 0:
             self.dlg.statusLabel.setText("Kunne ikke hente datasett")
@@ -222,6 +324,7 @@ class NgisOpenApiClient:
         self.dlg.logOutButton.setEnabled(True)
         self.dlg.addLayerButton.setEnabled(True)
         self.dlg.mAuthConfigSelect.setEnabled(False)
+        self.dlg.statusLabel.setText("")
         s = QgsSettings()
         s.setValue("ngisopenapi/auth_method_id", configId)
         return
@@ -256,12 +359,7 @@ class NgisOpenApiClient:
 
         # Get metadata and features from NgisOpenAPI
         metadata_from_api = self.client.getDatasetMetadata(selected_id)
-        epsg = metadata_from_api.coordinate_reference_system
-        epsg_location = epsg.lower().find("epsg:")
-        if (epsg_location == 0):
-            epsg = epsg[5:]
-
-        #TODO REMOVE
+        epsg = metadata_from_api.crs_epsg
         features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
         crs_from_api = features_from_api['crs']['properties']['name']
         features_by_type = {}
@@ -302,17 +400,15 @@ class NgisOpenApiClient:
 
             for geom_type, feature_types in geometry_dict.items():
                 for feature_type, features in feature_types.items():
-                    #lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}', "memory")
-                    lyr = QgsVectorLayer(f'{geom_type}?crs=EPSG:25832', f'{feature_type}-{geom_type}', "memory") #TODO Remove
+                    lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}', "memory")
+                    #lyr = QgsVectorLayer(f'{geom_type}?crs=EPSG:25832', f'{feature_type}-{geom_type}', "memory") #TODO Remove
                     QgsProject.instance().addMapLayer(lyr, False)
                     
                     lyr.startEditing()
-                    for field in fields:
-                        addAttribute = lyr.addAttribute(field)
-                        type = field.type()
-                    # save changes made in 'rev_lyr'
-                    lyr.commitChanges()
+                    
+                    self.addFieldsToLayer(lyr, fields, feature_type)
 
+                    lyr.commitChanges()
                     l_d = lyr.dataProvider()
                     l_d.addFeatures(features)
                     # update the extent of rev_lyr
@@ -320,11 +416,75 @@ class NgisOpenApiClient:
                     # save changes made in 'rev_lyr'
                     lyr.commitChanges()
                     group.addLayer(lyr)
-
                     lyr.featureAdded.connect(self.aa)
-                    lyr.committedFeaturesAdded.connect(self.bb)
+                    #lyr.committedFeaturesAdded.connect(self.handleCommitedAddedFeatures)
+                    #lyr.committedFeaturesRemoved.connect(self.handleCommittedFeaturesRemoved)
+                    #lyr.featuresDeleted.connect(self.handleDeletedFeatures)
+                    #lyr.committedGeometriesChanges(self.ee)
+                    
+                    lyr.beforeCommitChanges.connect(self.handleBeforeCommitChanges)
+
                     self.dataset_dictionary[lyr.id()] = selected_id
                     self.feature_type_dictionary[lyr.id()] = feature_type
+
+    
+    def addFieldsToLayer(self, lyr, fields, feature_type):
+        schemadefinition = self.getSchemaDefinition()
+        for field_idx, field in enumerate(fields):
+            if feature_type in schemadefinition:
+                if field.name() in schemadefinition[feature_type]:
+                    not_null = schemadefinition[feature_type][field.name()]['not_null'] if 'not_null' in schemadefinition[feature_type][field.name()] else False
+                    if not_null:
+                        constaints = QgsFieldConstraints()
+                        constaints.setConstraint(1)
+                        field.setConstraints(constaints)
+            addAttribute = lyr.addAttribute(field)
+            if feature_type in schemadefinition:
+                if field.name() in schemadefinition[feature_type]:
+                    field_type = schemadefinition[feature_type][field.name()]['type'] if 'type' in schemadefinition[feature_type][field.name()] else False
+                    if field_type == "datetime":
+                        self.field_to_datetime(lyr, field_idx)
+                    default_text = schemadefinition[feature_type][field.name()]['default'] if 'default' in schemadefinition[feature_type][field.name()] else None
+                    if default_text:
+                        self.field_to_default_text(lyr, field_idx, field_type, default_text)
+                    enum = schemadefinition[feature_type][field.name()]['enum'] if 'enum' in schemadefinition[feature_type][field.name()] else None
+                    if enum:
+                        self.field_to_enum(lyr, field_idx, enum)
+                    read_only = schemadefinition[feature_type][field.name()]['read_only'] if 'read_only' in schemadefinition[feature_type][field.name()] else None
+                    if read_only:
+                        form_config = lyr.editFormConfig()
+                        form_config.setReadOnly(field_idx, True)
+                        lyr.setEditFormConfig(form_config)
+                    
+        featuretype_idx = fields.indexOf("featuretype")
+        if featuretype_idx >= 0:
+            lyr.setDefaultValueDefinition(featuretype_idx, QgsDefaultValue(f'\'{feature_type}\''))
+
+    def field_to_enum(self, layer, field_idx, enum):
+        
+        enum = {key: key for key in enum}
+        field_type = 'ValueMap'
+        config = {'map' : enum}
+        widget_setup = QgsEditorWidgetSetup(field_type, config)
+        layer.setEditorWidgetSetup(field_idx, widget_setup)
+
+    def field_to_default_text(self, layer, field_idx, field_type, default_text):
+        if field_type == "numeric":
+            layer.setDefaultValueDefinition(field_idx, QgsDefaultValue(f'{default_text}'))
+        else:
+            layer.setDefaultValueDefinition(field_idx, QgsDefaultValue(f'\'{default_text}\''))
+
+    def field_to_datetime(self, layer, field_idx):
+        config = {
+                'allow_null': False,
+                'calendar_popup': True,
+                'display_format': 'yyyy-MM-dd',
+                'field_format': 'yyyy-MM-dd',
+                'field_iso_format': True
+                }
+        field_type = 'DateTime'
+        widget_setup = QgsEditorWidgetSetup(field_type, config)
+        layer.setEditorWidgetSetup(field_idx, widget_setup)
 
     def aa(self, ide):
         print(ide)
@@ -333,21 +493,180 @@ class NgisOpenApiClient:
         renderer = lyr.renderer()
         print("Type:", renderer.type())
         print(feature)
+    
+    def handleBeforeCommitChanges(self):
         
+        layer = self.iface.activeLayer()
 
-    def bb(self, layerId , addedFeatures ):
-        print(layerId, addedFeatures)
+        if layer.editBuffer():
+            ids_deleted = layer.editBuffer().deletedFeatureIds()
+            features_deleted = layer.dataProvider().getFeatures(QgsFeatureRequest().setFilterFids(ids_deleted))
+            features_added = layer.editBuffer().addedFeatures()
+            changed_geometries = layer.editBuffer().changedGeometries()
+            changed_attribute_values = layer.editBuffer().changedAttributeValues()
 
-        lyr = QgsProject.instance().mapLayer(layerId)
-        export = QgsJsonExporter(lyr)
-        features_json = export.exportFeatures(addedFeatures)
-        json_dict = json.loads(features_json)
-        for feature in json_dict['features']:
-            feature['properties']['update'] = {"action":"Create"}
-            feature['properties']['featuretype'] = self.feature_type_dictionary[lyr.id()]
-            del feature['properties']['UNLOCODE']
-        #json_dump = json.dumps(json_dict, ensure_ascii=False)
-        self.client.createDatasetFeatures(self.dataset_dictionary[lyr.id()], json_dict)
+            features = []
+            features = features + self.handleCommittedFeaturesRemoved(layer, features_deleted)
+            features = features + self.handleCommitedAddedFeatures(layer, features_added)
+            features = features + self.handleChangedValues(layer, changed_attribute_values, changed_geometries, ids_deleted)
+            
+            self.handleAlteredFeatures(layer, features)
+
+    def createCrsEntry(self, epsg):
+        return {
+            "crs": {
+                "type": "name",
+                "properties": {
+                    "name": f"{epsg}"
+                }
+            }
+        }
+
+    def authidToCode(self, authid):
+        epsg_tag_idx = authid.lower().find("epsg:")
+        if epsg_tag_idx > -1:
+            code = authid[epsg_tag_idx+5:]
+            return code
+
+    def tryParseJson(self, myjson):
+        try:
+            json_object = json.loads(myjson)
+            return json_object
+        except Exception:
+            return myjson
+
+    def lockFeature(self, lyr, changed_feature):
+        lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+        datasetid = self.dataset_dictionary[lyr.id()]
+        crs = lyr.crs().authid()
+        crs_epsg = self.authidToCode(crs)
+        try:
+            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            return feature_with_lock
+        except Exception as e:
+            title = "Låsing mislyktes"
+            text = "Kunne ikke låse feature"
+            show_more = str(e)
+            try:
+                error_object = json.loads(e.body)
+                title = error_object['title'] if 'title' in error_object else None
+                text = error_object["detail"] if 'detail' in error_object else None
+                show_more = str(error_object["errors"]) if 'errors' in error_object else None
+            except:
+                pass
+            self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
+
+    def handleChangedValues(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
+        
+        features = []
+        for fid, attributes in changed_attribute_values.items():
+            
+            if fid in ids_deleted: continue
+
+            changed_feature = lyr.getFeature(fid)
+            feature_with_lock = self.lockFeature(lyr, changed_feature)
+            
+            for attribute_idx, attribute in attributes.items():
+                attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
+                attribute_value = self.tryParseJson(attribute)
+                updated = {attribute_name : attribute_value}
+                feature_with_lock["features"][0]["properties"].update(updated)
+            
+            if fid in changed_geometries:
+                geometry = changed_geometries[fid]
+                feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
+                changed_geometries.pop(fid)
+
+            feature_with_lock["features"][0]['update'] = {'action': 'Replace'}
+            features = features + feature_with_lock["features"]
+        
+        for fid, geometry in changed_geometries.items():
+            
+            if fid in ids_deleted: continue
+
+            changed_feature = lyr.getFeature(fid)
+            feature_with_lock = self.lockFeature(lyr, changed_feature)
+
+            feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
+            
+            feature_with_lock['features'][0]['update'] = {'action': 'Replace'}
+            features = features + feature_with_lock["features"]
+        
+        return features
+
+    def handleCommittedFeaturesRemoved(self, lyr, deleted_features):
+        
+        features = []
+        for deleted_feature in deleted_features:
+            
+            feature_with_lock = self.lockFeature(lyr, deleted_feature)
+
+            feature_with_lock['features'][0]['update'] = {'action': 'Erase'}
+            features = features + feature_with_lock["features"]
+        return features
+
+    def handleCommitedAddedFeatures(self, lyr, addedFeatures):
+        features = []
+        for fid, feature in addedFeatures.items():
+            
+            export = QgsJsonExporter(lyr)
+            export.setSourceCrs(QgsCoordinateReferenceSystem())
+            
+            identifikasjon_idx = feature.fieldNameIndex('identifikasjon')
+            identifikasjon_value = json.loads(feature.attribute('identifikasjon'))
+            identifikasjon_value["lokalId"] = str(uuid.uuid4())
+            feature.setAttribute('identifikasjon', identifikasjon_value)
+
+            feature.setAttribute('featuretype', self.feature_type_dictionary[lyr.id()])
+            feature_json = json.loads(export.exportFeature(feature))
+            
+            # Don't include null values in json, Ngis open API doesn't like it
+            prop_for_deletion = []
+            for property_name, property_value in feature_json['properties'].items():
+                if not property_value:
+                    prop_for_deletion.append(property_name)
+                else:
+                    feature_json['properties'][property_name] = self.tryParseJson(property_value)
+            for prop in prop_for_deletion:
+                del feature_json['properties'][prop]
+            
+            feature_json['update'] = {"action":"Create"}
+            features.append(feature_json)
+
+            # Update QGIS layer with new uuid, must be string (not json)
+            feature.setAttribute('identifikasjon', json.dumps(identifikasjon_value))
+            lyr.updateFeature(feature)
+
+        return features
+
+    
+    def handleAlteredFeatures(self, lyr, features):
+       
+        try:
+            json_dict = {"type": "FeatureCollection", "features" : None, "crs" : None}
+            
+            crs = lyr.crs().authid()
+            crs_epsg = self.authidToCode(crs)
+            json_dict.update(self.createCrsEntry(crs))
+            json_dict['features'] = features
+
+            datasetid = self.dataset_dictionary[lyr.id()]
+            return_data = self.client.updateDatasetFeature(datasetid, crs_epsg, json_dict)
+            self.iface.messageBar().pushMessage("Success", "Endringene er lagret", str(return_data), level=3, duration=10)
+            
+        except Exception as e:
+           
+            title = "Lagring mislyktes"
+            text = "Kunne ikke lagre endringene"
+            show_more = str(e)
+            try:
+                error_object = json.loads(e.body)
+                title = error_object['title'] if 'title' in error_object else None
+                text = error_object["detail"] if 'detail' in error_object else None
+                show_more = str(error_object["errors"]) if 'errors' in error_object else None
+            except:
+                pass
+            self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
 
     def run(self):
         """Run method that performs all the real work"""

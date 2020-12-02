@@ -85,7 +85,7 @@ class NgisOpenApiClient:
 
         # Declare instance attributes
         self.actions = []
-        self.menu = self.tr(u'&NGIS OpenAPI Client')
+        self.menu = self.tr(u'&NGIS-OpenAPI')
 
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
@@ -283,7 +283,7 @@ class NgisOpenApiClient:
         icon_path = ':/plugins/ngis_openapi_client/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'NGIS OpenAPI Client'),
+            text=self.tr(u'NGIS-OpenAPI Klient'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
@@ -295,7 +295,7 @@ class NgisOpenApiClient:
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
-                self.tr(u'&NGIS OpenAPI Client'),
+                self.tr(u'&NGIS-OpenAPI Klient'),
                 action)
             self.iface.removeToolBarIcon(action)
 

@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>NGIS OpenAPI Client</string>
+   <string>NGIS-OpenAPI Klient</string>
   </property>
   <widget class="QPushButton" name="logInButton">
    <property name="geometry">

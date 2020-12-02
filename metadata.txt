@@ -5,7 +5,7 @@
 [general]
 name=NGIS-OpenAPI Klient
 qgisMinimumVersion=3.0
-description=Plugin for nedlasting av data fra NGIS OpenAPI
+description=Programtillegg for asjourføring av data i SFKB via NGIS-OpenAPI
 version=0.1
 author=Norconsult Informasjonssystemer AS
 email=post@nois.no

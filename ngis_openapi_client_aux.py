@@ -5,7 +5,7 @@ from qgis.core import (
     QgsFieldConstraints
 )
 
-def createCrsEntry(epsg):
+def create_crs_entry(epsg):
     return {
         "crs": {
             "type": "name",
@@ -15,22 +15,20 @@ def createCrsEntry(epsg):
         }
     }
 
-def authidToCode(authid):
+def authid_to_code(authid):
     epsg_tag_idx = authid.lower().find("epsg:")
     if epsg_tag_idx > -1:
         code = authid[epsg_tag_idx+5:]
         return code
 
-
-def tryParseJson(myjson):
+def try_parse_json(myjson):
     try:
         json_object = json.loads(myjson)
         return json_object
     except Exception:
         return myjson
 
-
-schemadefinition = {
+schema_definition = {
     "Vanntilkobling" : 
         {
         "featuretype":{
@@ -124,29 +122,28 @@ schemadefinition = {
     }
 }
 
-
-def addFieldsToLayer(lyr, fields, feature_type):
+def add_fields_to_layer(lyr, fields, feature_type):
     for field_idx, field in enumerate(fields):
-        if feature_type in schemadefinition:
-            if field.name() in schemadefinition[feature_type]:
-                not_null = schemadefinition[feature_type][field.name()]['not_null'] if 'not_null' in schemadefinition[feature_type][field.name()] else False
+        if feature_type in schema_definition:
+            if field.name() in schema_definition[feature_type]:
+                not_null = schema_definition[feature_type][field.name()]['not_null'] if 'not_null' in schema_definition[feature_type][field.name()] else False
                 if not_null:
                     constaints = QgsFieldConstraints()
                     constaints.setConstraint(1)
                     field.setConstraints(constaints)
         addAttribute = lyr.addAttribute(field)
-        if feature_type in schemadefinition:
-            if field.name() in schemadefinition[feature_type]:
-                field_type = schemadefinition[feature_type][field.name()]['type'] if 'type' in schemadefinition[feature_type][field.name()] else False
+        if feature_type in schema_definition:
+            if field.name() in schema_definition[feature_type]:
+                field_type = schema_definition[feature_type][field.name()]['type'] if 'type' in schema_definition[feature_type][field.name()] else False
                 if field_type == "datetime":
                     field_to_datetime(lyr, field_idx)
-                default_text = schemadefinition[feature_type][field.name()]['default'] if 'default' in schemadefinition[feature_type][field.name()] else None
+                default_text = schema_definition[feature_type][field.name()]['default'] if 'default' in schema_definition[feature_type][field.name()] else None
                 if default_text:
                     field_to_default_text(lyr, field_idx, field_type, default_text)
-                enum = schemadefinition[feature_type][field.name()]['enum'] if 'enum' in schemadefinition[feature_type][field.name()] else None
+                enum = schema_definition[feature_type][field.name()]['enum'] if 'enum' in schema_definition[feature_type][field.name()] else None
                 if enum:
                     field_to_enum(lyr, field_idx, enum)
-                read_only = schemadefinition[feature_type][field.name()]['read_only'] if 'read_only' in schemadefinition[feature_type][field.name()] else None
+                read_only = schema_definition[feature_type][field.name()]['read_only'] if 'read_only' in schema_definition[feature_type][field.name()] else None
                 if read_only:
                     form_config = lyr.editFormConfig()
                     form_config.setReadOnly(field_idx, True)

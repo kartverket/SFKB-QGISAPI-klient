@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox
 from qgis.utils import plugins
@@ -309,7 +309,7 @@ class NgisOpenApiClient:
                     
                     lyr.startEditing()
                     
-                    addFieldsToLayer(lyr, fields, feature_type)
+                    add_fields_to_layer(lyr, fields, feature_type)
 
                     lyr.commitChanges()
                     l_d = lyr.dataProvider()
@@ -325,12 +325,12 @@ class NgisOpenApiClient:
                     #lyr.featuresDeleted.connect(self.handleDeletedFeatures)
                     #lyr.committedGeometriesChanges(self.ee)
                     
-                    lyr.beforeCommitChanges.connect(self.handleBeforeCommitChanges)
+                    lyr.beforeCommitChanges.connect(self.handle_before_commitchanges)
 
                     self.dataset_dictionary[lyr.id()] = selected_id
                     self.feature_type_dictionary[lyr.id()] = feature_type
   
-    def handleBeforeCommitChanges(self):
+    def handle_before_commitchanges(self):
         
         layer = self.iface.activeLayer()
 
@@ -342,17 +342,17 @@ class NgisOpenApiClient:
             changed_attribute_values = layer.editBuffer().changedAttributeValues()
 
             features = []
-            features = features + self.handleCommittedFeaturesRemoved(layer, features_deleted)
-            features = features + self.handleCommitedAddedFeatures(layer, features_added)
-            features = features + self.handleChangedValues(layer, changed_attribute_values, changed_geometries, ids_deleted)
+            features = features + self.handle_committed_features_removed(layer, features_deleted)
+            features = features + self.handle_committed_features_added(layer, features_added)
+            features = features + self.handle_changed_values(layer, changed_attribute_values, changed_geometries, ids_deleted)
             
-            self.handleAlteredFeatures(layer, features)
+            self.handle_altered_features(layer, features)
 
-    def lockFeature(self, lyr, changed_feature):
+    def lock_feature(self, lyr, changed_feature):
         lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
         datasetid = self.dataset_dictionary[lyr.id()]
         crs = lyr.crs().authid()
-        crs_epsg = authidToCode(crs)
+        crs_epsg = authid_to_code(crs)
         try:
             feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
             return feature_with_lock
@@ -369,7 +369,7 @@ class NgisOpenApiClient:
                 pass
             self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
 
-    def handleChangedValues(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
+    def handle_changed_values(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
         
         features = []
         for fid, attributes in changed_attribute_values.items():
@@ -377,11 +377,15 @@ class NgisOpenApiClient:
             if fid in ids_deleted: continue
 
             changed_feature = lyr.getFeature(fid)
-            feature_with_lock = self.lockFeature(lyr, changed_feature)
+            feature_with_lock = self.lock_feature(lyr, changed_feature)
             
             for attribute_idx, attribute in attributes.items():
                 attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
-                attribute_value = tryParseJson(attribute)
+                if type(attribute) == QDate:
+                    attribute_value = attribute.toString("yyyy-MM-dd")
+                else:
+                    attribute_value = try_parse_json(attribute)
+                
                 updated = {attribute_name : attribute_value}
                 feature_with_lock["features"][0]["properties"].update(updated)
             
@@ -398,7 +402,7 @@ class NgisOpenApiClient:
             if fid in ids_deleted: continue
 
             changed_feature = lyr.getFeature(fid)
-            feature_with_lock = self.lockFeature(lyr, changed_feature)
+            feature_with_lock = self.lock_feature(lyr, changed_feature)
 
             feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
             
@@ -407,20 +411,20 @@ class NgisOpenApiClient:
         
         return features
 
-    def handleCommittedFeaturesRemoved(self, lyr, deleted_features):
+    def handle_committed_features_removed(self, lyr, deleted_features):
         
         features = []
         for deleted_feature in deleted_features:
             
-            feature_with_lock = self.lockFeature(lyr, deleted_feature)
+            feature_with_lock = self.lock_feature(lyr, deleted_feature)
 
             feature_with_lock['features'][0]['update'] = {'action': 'Erase'}
             features = features + feature_with_lock["features"]
         return features
 
-    def handleCommitedAddedFeatures(self, lyr, addedFeatures):
+    def handle_committed_features_added(self, lyr, added_features):
         features = []
-        for fid, feature in addedFeatures.items():
+        for fid, feature in added_features.items():
             
             export = QgsJsonExporter(lyr)
             export.setSourceCrs(QgsCoordinateReferenceSystem())
@@ -439,7 +443,7 @@ class NgisOpenApiClient:
                 if not property_value:
                     prop_for_deletion.append(property_name)
                 else:
-                    feature_json['properties'][property_name] = tryParseJson(property_value)
+                    feature_json['properties'][property_name] = try_parse_json(property_value)
             for prop in prop_for_deletion:
                 del feature_json['properties'][prop]
             
@@ -452,7 +456,7 @@ class NgisOpenApiClient:
 
         return features
 
-    def handleAlteredFeatures(self, lyr, features):
+    def handle_altered_features(self, lyr, features):
        
         try:
 
@@ -463,8 +467,8 @@ class NgisOpenApiClient:
             json_dict = {"type": "FeatureCollection", "features" : None, "crs" : None}
             
             crs = lyr.crs().authid()
-            crs_epsg = authidToCode(crs)
-            json_dict.update(createCrsEntry(crs))
+            crs_epsg = authid_to_code(crs)
+            json_dict.update(create_crs_entry(crs))
             json_dict['features'] = features
 
             datasetid = self.dataset_dictionary[lyr.id()]

@@ -6,7 +6,7 @@ Kartverket har satt i gang et prosjekt for å få kartlagt et utvalg havner i No
 har som målsetning å få etablert standardiserte datasett for havnedata i 14-17 havner i Norge.
 
 Målsetningen med dette del-prosjektet var å få laget en referanseimplementasjon i QGIS programvaren som
-muliggjør innlegging og ajourføring av havnedata-objekter gjennom NGIS-OpenAPI mot SFKB.
+muliggjør innlegging og ajourføring av havnedata-objekter gjennom NGIS-OpenAPI mot Sentral FKB.
 
 Resultatet av prosjektet var QGIS programtillegget «NGIS-OpenAPI Klient» skrevet i python.
 Dette programtillegget kan i dag laste ned og presentere datasett fra NGIS-OpenAPI, og støtter også enkel redigering av utvalgte havnedata objekter.

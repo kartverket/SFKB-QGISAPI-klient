@@ -48,7 +48,7 @@ import json
 import uuid
 from .login import NgisOpenApiClientAuthentication
 from .http_client import NgisHttpClient
-
+from .ngis_openapi_client_aux import *
 # Initialize Qt resources from file resources.py
 from .resources import *
 # Import the code for the dialog
@@ -94,99 +94,6 @@ class NgisOpenApiClient:
         self.feature_type_dictionary = {}
         self.layer_dictionary = {}
         self.client = None
-    def getSchemaDefinition(self):
-        return {
-            "Vanntilkobling" : {
-                "featuretype":{
-                    "read_only" : True
-                },
-                "datafangstdato": {
-                    "type" : "datetime"
-                },
-                "havneident": {
-                    "not_null" : True,
-                    "default" : "havn"
-                },
-                "kaiident": {
-                    "not_null" : True,
-                    "default" : "kai"
-                },
-                "oppdateringsdato": {
-                    "type" : "datetime"
-                },
-                "informasjon": {
-                    "not_null" : False,
-                },
-                "UNLOCODE": {
-                    "not_null" : True,
-                    "default" : "NOIS"
-                },
-                "vanntilkobling": {
-                    "enum" : ["ferskvann", "saltvann"],
-                    "not_null" : True,
-                    "default" : "ferskvann"
-                },
-                "identifikasjon": {
-                    "read_only" : True,
-                    "default" : f'{{ "navnerom": "data.geonorge.no/havnedata/so", "lokalId": "", "versjonId": "2020-10-26 11:10:36.246000" }}'
-                },
-                "kvalitet": {
-                    "not_null" : True,
-                    "default" : '{ "målemetode": "10", "nøyaktighet": 10, "synbarhet": "1", "målemetodeHøyde": "10", "nøyaktighetHøyde": 10 }'
-                },
-                "høydereferanse": {
-                    "not_null" : True,
-                    "default" : 'ukjent'
-                },
-                "link": {
-                    "not_null" : True,
-                    "default" : 'x'
-                },
-                "kumnummer": {
-                    "not_null" : True,
-                    "default" : 2,
-                    "type" : "numeric"
-                },
-            },
-            "Havnegjerde" : {
-                "featuretype":{
-                    "read_only" : True
-                },
-                "datafangstdato": {
-                    "type" : "datetime"
-                },
-                "havneident": {
-                    "not_null" : True,
-                    "default" : "havn"
-                },
-                "oppdateringsdato": {
-                    "type" : "datetime"
-                },
-                "informasjon": {
-                    "not_null" : False,
-                },
-                "identifikasjon": {
-                    "read_only" : True,
-                    "default" : f'{{ "navnerom": "data.geonorge.no/havnedata/so", "lokalId": "", "versjonId": "2020-10-26 11:10:36.246000" }}'
-                },
-                "kvalitet": {
-                    "not_null" : True,
-                    "default" : '{ "målemetode": "10", "nøyaktighet": 10, "synbarhet": "1", "målemetodeHøyde": "10", "nøyaktighetHøyde": 10 }'
-                },
-                 "UNLOCODE": {
-                    "not_null" : True,
-                    "default" : "NOIS"
-                },
-                "høydereferanse": {
-                    "not_null" : True,
-                    "default" : 'ukjent'
-                },
-                "link": {
-                    "not_null" : True,
-                    "default" : 'x'
-                }
-            }
-        }
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
         """Get the translation for a string using Qt translation API.
@@ -201,7 +108,6 @@ class NgisOpenApiClient:
         """
         # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
         return QCoreApplication.translate('NgisOpenApiClient', message)
-
 
     def add_action(
         self,
@@ -290,7 +196,6 @@ class NgisOpenApiClient:
         # will be set False in run()
         self.first_start = True
 
-
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
@@ -325,6 +230,7 @@ class NgisOpenApiClient:
         self.dlg.addLayerButton.setEnabled(True)
         self.dlg.mAuthConfigSelect.setEnabled(False)
         self.dlg.statusLabel.setText("")
+        # Remember login method
         s = QgsSettings()
         s.setValue("ngisopenapi/auth_method_id", configId)
         return
@@ -337,9 +243,6 @@ class NgisOpenApiClient:
         self.dlg.mAuthConfigSelect.setEnabled(True)
         self.dlg.mComboBox.setEnabled(False)
         self.client = None
-    
-    def handle_add_layer(self):
-        self.create_layer()
 
     def create_group(self, name):
         root = QgsProject.instance().layerTreeRoot()
@@ -348,7 +251,7 @@ class NgisOpenApiClient:
             group = root.insertGroup(0, name)
         return group
 
-    def create_layer(self):
+    def handle_add_layer(self):
         """Create a new layer by name (rev_lyr)"""
 
         selected_name = self.dlg.mComboBox.currentText()
@@ -406,7 +309,7 @@ class NgisOpenApiClient:
                     
                     lyr.startEditing()
                     
-                    self.addFieldsToLayer(lyr, fields, feature_type)
+                    addFieldsToLayer(lyr, fields, feature_type)
 
                     lyr.commitChanges()
                     l_d = lyr.dataProvider()
@@ -416,7 +319,7 @@ class NgisOpenApiClient:
                     # save changes made in 'rev_lyr'
                     lyr.commitChanges()
                     group.addLayer(lyr)
-                    lyr.featureAdded.connect(self.aa)
+                   
                     #lyr.committedFeaturesAdded.connect(self.handleCommitedAddedFeatures)
                     #lyr.committedFeaturesRemoved.connect(self.handleCommittedFeaturesRemoved)
                     #lyr.featuresDeleted.connect(self.handleDeletedFeatures)
@@ -426,74 +329,7 @@ class NgisOpenApiClient:
 
                     self.dataset_dictionary[lyr.id()] = selected_id
                     self.feature_type_dictionary[lyr.id()] = feature_type
-
-    
-    def addFieldsToLayer(self, lyr, fields, feature_type):
-        schemadefinition = self.getSchemaDefinition()
-        for field_idx, field in enumerate(fields):
-            if feature_type in schemadefinition:
-                if field.name() in schemadefinition[feature_type]:
-                    not_null = schemadefinition[feature_type][field.name()]['not_null'] if 'not_null' in schemadefinition[feature_type][field.name()] else False
-                    if not_null:
-                        constaints = QgsFieldConstraints()
-                        constaints.setConstraint(1)
-                        field.setConstraints(constaints)
-            addAttribute = lyr.addAttribute(field)
-            if feature_type in schemadefinition:
-                if field.name() in schemadefinition[feature_type]:
-                    field_type = schemadefinition[feature_type][field.name()]['type'] if 'type' in schemadefinition[feature_type][field.name()] else False
-                    if field_type == "datetime":
-                        self.field_to_datetime(lyr, field_idx)
-                    default_text = schemadefinition[feature_type][field.name()]['default'] if 'default' in schemadefinition[feature_type][field.name()] else None
-                    if default_text:
-                        self.field_to_default_text(lyr, field_idx, field_type, default_text)
-                    enum = schemadefinition[feature_type][field.name()]['enum'] if 'enum' in schemadefinition[feature_type][field.name()] else None
-                    if enum:
-                        self.field_to_enum(lyr, field_idx, enum)
-                    read_only = schemadefinition[feature_type][field.name()]['read_only'] if 'read_only' in schemadefinition[feature_type][field.name()] else None
-                    if read_only:
-                        form_config = lyr.editFormConfig()
-                        form_config.setReadOnly(field_idx, True)
-                        lyr.setEditFormConfig(form_config)
-                    
-        featuretype_idx = fields.indexOf("featuretype")
-        if featuretype_idx >= 0:
-            lyr.setDefaultValueDefinition(featuretype_idx, QgsDefaultValue(f'\'{feature_type}\''))
-
-    def field_to_enum(self, layer, field_idx, enum):
-        
-        enum = {key: key for key in enum}
-        field_type = 'ValueMap'
-        config = {'map' : enum}
-        widget_setup = QgsEditorWidgetSetup(field_type, config)
-        layer.setEditorWidgetSetup(field_idx, widget_setup)
-
-    def field_to_default_text(self, layer, field_idx, field_type, default_text):
-        if field_type == "numeric":
-            layer.setDefaultValueDefinition(field_idx, QgsDefaultValue(f'{default_text}'))
-        else:
-            layer.setDefaultValueDefinition(field_idx, QgsDefaultValue(f'\'{default_text}\''))
-
-    def field_to_datetime(self, layer, field_idx):
-        config = {
-                'allow_null': False,
-                'calendar_popup': True,
-                'display_format': 'yyyy-MM-dd',
-                'field_format': 'yyyy-MM-dd',
-                'field_iso_format': True
-                }
-        field_type = 'DateTime'
-        widget_setup = QgsEditorWidgetSetup(field_type, config)
-        layer.setEditorWidgetSetup(field_idx, widget_setup)
-
-    def aa(self, ide):
-        print(ide)
-        lyr = self.iface.activeLayer()
-        feature = lyr.getFeature(ide)
-        renderer = lyr.renderer()
-        print("Type:", renderer.type())
-        print(feature)
-    
+  
     def handleBeforeCommitChanges(self):
         
         layer = self.iface.activeLayer()
@@ -512,34 +348,11 @@ class NgisOpenApiClient:
             
             self.handleAlteredFeatures(layer, features)
 
-    def createCrsEntry(self, epsg):
-        return {
-            "crs": {
-                "type": "name",
-                "properties": {
-                    "name": f"{epsg}"
-                }
-            }
-        }
-
-    def authidToCode(self, authid):
-        epsg_tag_idx = authid.lower().find("epsg:")
-        if epsg_tag_idx > -1:
-            code = authid[epsg_tag_idx+5:]
-            return code
-
-    def tryParseJson(self, myjson):
-        try:
-            json_object = json.loads(myjson)
-            return json_object
-        except Exception:
-            return myjson
-
     def lockFeature(self, lyr, changed_feature):
         lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
         datasetid = self.dataset_dictionary[lyr.id()]
         crs = lyr.crs().authid()
-        crs_epsg = self.authidToCode(crs)
+        crs_epsg = authidToCode(crs)
         try:
             feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
             return feature_with_lock
@@ -568,7 +381,7 @@ class NgisOpenApiClient:
             
             for attribute_idx, attribute in attributes.items():
                 attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
-                attribute_value = self.tryParseJson(attribute)
+                attribute_value = tryParseJson(attribute)
                 updated = {attribute_name : attribute_value}
                 feature_with_lock["features"][0]["properties"].update(updated)
             
@@ -626,7 +439,7 @@ class NgisOpenApiClient:
                 if not property_value:
                     prop_for_deletion.append(property_name)
                 else:
-                    feature_json['properties'][property_name] = self.tryParseJson(property_value)
+                    feature_json['properties'][property_name] = tryParseJson(property_value)
             for prop in prop_for_deletion:
                 del feature_json['properties'][prop]
             
@@ -639,7 +452,6 @@ class NgisOpenApiClient:
 
         return features
 
-    
     def handleAlteredFeatures(self, lyr, features):
        
         try:
@@ -651,8 +463,8 @@ class NgisOpenApiClient:
             json_dict = {"type": "FeatureCollection", "features" : None, "crs" : None}
             
             crs = lyr.crs().authid()
-            crs_epsg = self.authidToCode(crs)
-            json_dict.update(self.createCrsEntry(crs))
+            crs_epsg = authidToCode(crs)
+            json_dict.update(createCrsEntry(crs))
             json_dict['features'] = features
 
             datasetid = self.dataset_dictionary[lyr.id()]
@@ -680,6 +492,7 @@ class NgisOpenApiClient:
 
         if self.first_start == True:
             self.first_start = False
+            # Get previous login method if any
             s = QgsSettings()
             auth_method_id = s.value("ngisopenapi/auth_method_id", "")
             #keep a modeless dialog window on top of the main QGIS window.
@@ -690,22 +503,3 @@ class NgisOpenApiClient:
             self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
         # show the dialog
         self.dlg.show()
-        # Run the dialog event loop
-        
-       
-        '''
-        result = self.dlg.exec_()
-        # See if OK was pressed
-        if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
-            pass
-        
-       
-        isrunning = plugins["ngis_openapi_client"]
-        if (isrunning.dlg):
-            if isrunning.dlg.isVisible():
-                isrunning.dlg.activateWindow()
-                return
-
-        '''

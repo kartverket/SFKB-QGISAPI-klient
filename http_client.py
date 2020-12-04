@@ -51,12 +51,12 @@ class NgisHttpClient:
         feature = self.features_api_instance.update_dataset_features(body, self.x_client_product_version, dataset_id, locking_type='user_lock', crs_epsg=crs_epsg)
         return feature
 
-    def getDatasetFeatureWithLock(self, dataset_id, lokal_id, crs_epsg):
+    def getDatasetFeatureWithLock(self, dataset_id, lokal_id, crs_epsg, references='none'):
         self.features_api_instance.api_client.set_default_header("Accept", "application/vnd.kartverket.sosi+json")
-        feature = self.features_api_instance.get_dataset_feature(self.x_client_product_version, dataset_id, lokal_id, references='none', locking_type='user_lock', crs_epsg=crs_epsg)
+        feature = self.features_api_instance.get_dataset_feature(self.x_client_product_version, dataset_id, lokal_id, references=references, locking_type='user_lock', crs_epsg=crs_epsg)
         return feature
 
-    def getDatasetFeatures(self, dataset_id, bbox, crs_epsg, limit=None):
+    def getDatasetFeatures(self, dataset_id, bbox, crs_epsg, limit=None, references='none'):
         try:
             bbox = bbox['ll']+bbox['ur']
             bbox = ','.join(map(str, bbox))
@@ -65,10 +65,10 @@ class NgisHttpClient:
 
             # Preconfigured limit
             if limit:
-                return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references='none', limit=limit, bbox=bbox, crs_epsg=crs_epsg)
+                return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, limit=limit, bbox=bbox, crs_epsg=crs_epsg)
             # Use max limit provided by API
             else:
-                return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references='none', bbox=bbox, crs_epsg=crs_epsg)
+                return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, bbox=bbox, crs_epsg=crs_epsg)
             # Paging required
             while 'Link' in headers:
                 m = re.search('<(.+?)>', headers['Link'])
@@ -76,7 +76,7 @@ class NgisHttpClient:
                     url = m.group(1)
                     queryparams = dict(parse.parse_qsl(parse.urlsplit(url).query))
                     cursor = queryparams['cursor']
-                    paged_features, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references='none', limit=limit, cursor=cursor, bbox=bbox, crs_epsg=crs_epsg)
+                    paged_features, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, limit=limit, cursor=cursor, bbox=bbox, crs_epsg=crs_epsg)
                     return_data['features'] = return_data['features'] + paged_features['features']
             return return_data
         except ApiException as e:

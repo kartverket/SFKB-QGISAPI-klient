@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate, QVariant
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox
 from qgis.utils import plugins
@@ -341,20 +341,23 @@ class NgisOpenApiClient:
             changed_geometries = layer.editBuffer().changedGeometries()
             changed_attribute_values = layer.editBuffer().changedAttributeValues()
 
-            features = []
-            features = features + self.handle_committed_features_removed(layer, features_deleted)
-            features = features + self.handle_committed_features_added(layer, features_added)
-            features = features + self.handle_changed_values(layer, changed_attribute_values, changed_geometries, ids_deleted)
-            
-            self.handle_altered_features(layer, features)
+            try:
+                features = []
+                features = features + self.handle_committed_features_removed(layer, features_deleted)
+                features = features + self.handle_committed_features_added(layer, features_added)
+                features = features + self.handle_changed_values(layer, changed_attribute_values, changed_geometries, ids_deleted)
+                
+                self.handle_altered_features(layer, features)
+            except Exception as e:
+                self.iface.messageBar().pushMessage("Lagring mislyktes", "" , str(e), level=2, duration=10)
 
-    def lock_feature(self, lyr, changed_feature):
+    def lock_feature(self, lyr, changed_feature, references='none'):
         lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
         datasetid = self.dataset_dictionary[lyr.id()]
         crs = lyr.crs().authid()
         crs_epsg = authid_to_code(crs)
         try:
-            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg)
+            feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg, references)
             return feature_with_lock
         except Exception as e:
             title = "Låsing mislyktes"
@@ -367,7 +370,7 @@ class NgisOpenApiClient:
                 show_more = str(error_object["errors"]) if 'errors' in error_object else None
             except:
                 pass
-            self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
+            raise Exception(f'{title}: {show_more}')
 
     def handle_changed_values(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
         
@@ -377,31 +380,40 @@ class NgisOpenApiClient:
             if fid in ids_deleted: continue
 
             changed_feature = lyr.getFeature(fid)
-            feature_with_lock = self.lock_feature(lyr, changed_feature)
-            
-            for attribute_idx, attribute in attributes.items():
-                attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
-                if type(attribute) == QDate:
-                    attribute_value = attribute.toString("yyyy-MM-dd")
-                else:
-                    attribute_value = try_parse_json(attribute)
-                
-                updated = {attribute_name : attribute_value}
-                feature_with_lock["features"][0]["properties"].update(updated)
-            
-            if fid in changed_geometries:
-                geometry = changed_geometries[fid]
-                feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
-                changed_geometries.pop(fid)
+            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+            if lyr.geometryType() == QgsWkbTypes.PolygonGeometry:
+                feature_with_lock = self.lock_feature(lyr, changed_feature, 'direct')
+            else:
+                feature_with_lock = self.lock_feature(lyr, changed_feature)
 
-            feature_with_lock["features"][0]['update'] = {'action': 'Replace'}
-            features = features + feature_with_lock["features"]
+            for idx, feature in enumerate(feature_with_lock["features"]):
+                if feature["properties"]["identifikasjon"]["lokalId"] == lokalid:
+
+                    for attribute_idx, attribute in attributes.items():
+                        attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
+                        if type(attribute) == QDate:
+                            attribute_value = attribute.toString("yyyy-MM-dd")
+                        else:
+                            attribute_value = try_parse_json(attribute)
+                        
+                        updated = {attribute_name : attribute_value}
+                        feature_with_lock["features"][idx]["properties"].update(updated)
+                
+                    if fid in changed_geometries:
+                        geometry = changed_geometries[fid]
+                        feature_with_lock['features'][idx]['geometry'] = json.loads(geometry.asJson())
+                        changed_geometries.pop(fid)
+
+                    feature_with_lock["features"][idx]['update'] = {'action': 'Replace'}
+                features = features + [feature_with_lock["features"][idx]]
         
         for fid, geometry in changed_geometries.items():
             
             if fid in ids_deleted: continue
 
             changed_feature = lyr.getFeature(fid)
+
+            # TODO support for delt geometri
             feature_with_lock = self.lock_feature(lyr, changed_feature)
 
             feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
@@ -430,7 +442,12 @@ class NgisOpenApiClient:
             export.setSourceCrs(QgsCoordinateReferenceSystem())
             
             identifikasjon_idx = feature.fieldNameIndex('identifikasjon')
-            identifikasjon_value = json.loads(feature.attribute('identifikasjon'))
+            
+            try:
+                identifikasjon_value = json.loads(feature.attribute('identifikasjon'))
+            except Exception:
+                raise Exception("Kunne ikke tolke identifikasjonsattributtet")
+
             identifikasjon_value["lokalId"] = str(uuid.uuid4())
             feature.setAttribute('identifikasjon', identifikasjon_value)
 

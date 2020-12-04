@@ -25,12 +25,3 @@ Notes:
 
 *   Det er noen utfordringer med å redigere flateobjekt som referer avgrensingslinjer. Men egenskaper kan redigeres.
 *   Program-tillegget er ikke klar for et produksjons-miljø.
-
-
-</div>
-
-<div style="font-size:.9em;">
-
-For information on writing PyQGIS code, see **http://loc8.cc/pyqgis_resources** for a list of resources.
-
-</div>

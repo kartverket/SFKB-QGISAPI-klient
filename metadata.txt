@@ -8,7 +8,7 @@ qgisMinimumVersion=3.0
 description=Programtillegg for asjourføring av data i SFKB via NGIS-OpenAPI
 version=0.1
 author=Norconsult Informasjonssystemer AS
-email=post@nois.no
+email=magne.tondel@norconsult.com
 
 about=Dette programtillegget muliggjør at autentiserte brukere av NGIS-OpenAPI kan laste ned tilgjengelige datasett og ajourføre kartobjekter direkte i SFKB.
 

@@ -643,6 +643,11 @@ class NgisOpenApiClient:
     def handleAlteredFeatures(self, lyr, features):
        
         try:
+
+            if len(features) == 0:
+                self.iface.messageBar().pushMessage("Success", "Ingen endringer ble sjekket inn i NGIS-OpenAPI", level=3, duration=3)
+                return
+
             json_dict = {"type": "FeatureCollection", "features" : None, "crs" : None}
             
             crs = lyr.crs().authid()

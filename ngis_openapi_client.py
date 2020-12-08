@@ -53,6 +53,7 @@ from .ngis_openapi_client_aux import *
 from .resources import *
 # Import the code for the dialog
 from .ngis_openapi_client_dialog import NgisOpenApiClientDialog
+from xml.dom import minidom
 import os.path
 
 
@@ -254,6 +255,8 @@ class NgisOpenApiClient:
     def handle_add_layer(self):
         """Create a new layer by name (rev_lyr)"""
 
+        slds = self.get_sld()
+
         selected_name = self.dlg.mComboBox.currentText()
         selected_id = self.dataset_dictionary[selected_name]
         
@@ -327,9 +330,28 @@ class NgisOpenApiClient:
                     
                     lyr.beforeCommitChanges.connect(self.handle_before_commitchanges)
 
+                    if feature_type in slds:
+                        lyr.loadSldStyle(slds[feature_type])
+
                     self.dataset_dictionary[lyr.id()] = selected_id
                     self.feature_type_dictionary[lyr.id()] = feature_type
-  
+    
+    def get_sld(self):
+        sld_dict = {}
+        for filename in os.listdir(f"{os.path.dirname(__file__)}/stiler"):
+            full_path = f"{os.path.dirname(__file__)}/stiler/{filename}"
+            sld = minidom.parse(full_path)
+            styled_layer_descriptor = sld.getElementsByTagName('StyledLayerDescriptor')
+            if len(styled_layer_descriptor) == 1:
+                named_layers = styled_layer_descriptor[0].getElementsByTagName('NamedLayer')
+                for named_layer in named_layers:
+                    for child in named_layer.childNodes:
+                        if child.localName == "Name":
+                            name = child.firstChild.nodeValue
+                            sld_dict[name] = full_path
+                            break
+        return sld_dict
+
     def handle_before_commitchanges(self):
         
         layer = self.iface.activeLayer()
@@ -525,5 +547,6 @@ class NgisOpenApiClient:
             self.dlg.logInButton.clicked.connect(self.handle_login)
             self.dlg.logOutButton.clicked.connect(self.handle_logout)
             self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
+            
         # show the dialog
         self.dlg.show()

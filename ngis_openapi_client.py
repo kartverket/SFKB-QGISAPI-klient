@@ -381,7 +381,7 @@ class NgisOpenApiClient:
 
             changed_feature = lyr.getFeature(fid)
             lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
-            if lyr.geometryType() == QgsWkbTypes.PolygonGeometry:
+            if lyr.geometryType() == QgsWkbTypes.PolygonGeometry or lyr.geometryType() == QgsWkbTypes.LineGeometry:
                 feature_with_lock = self.lock_feature(lyr, changed_feature, 'direct')
             else:
                 feature_with_lock = self.lock_feature(lyr, changed_feature)
@@ -404,6 +404,9 @@ class NgisOpenApiClient:
                         feature_with_lock['features'][idx]['geometry'] = json.loads(geometry.asJson())
                         changed_geometries.pop(fid)
 
+                    feature_with_lock["features"][idx]['update'] = {'action': 'Replace'}
+                # If editing line attribute, and there is a feature with geometry_properties set, replace it also (should be polygon)
+                elif "geometry_properties" in feature_with_lock["features"][idx]:
                     feature_with_lock["features"][idx]['update'] = {'action': 'Replace'}
                 features = features + [feature_with_lock["features"][idx]]
         

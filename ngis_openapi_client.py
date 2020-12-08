@@ -338,8 +338,9 @@ class NgisOpenApiClient:
     
     def get_sld(self):
         sld_dict = {}
-        for filename in os.listdir(f"{os.path.dirname(__file__)}/stiler"):
-            full_path = f"{os.path.dirname(__file__)}/stiler/{filename}"
+        folder_name = f"{os.path.dirname(__file__)}/styles"
+        for filename in os.listdir(folder_name):
+            full_path = f"{folder_name}/{filename}"
             sld = minidom.parse(full_path)
             styled_layer_descriptor = sld.getElementsByTagName('StyledLayerDescriptor')
             if len(styled_layer_descriptor) == 1:

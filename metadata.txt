@@ -5,7 +5,7 @@
 [general]
 name=NGIS-OpenAPI Klient
 qgisMinimumVersion=3.0
-description=Programtillegg for asjourføring av data i SFKB via NGIS-OpenAPI
+description=Programtillegg for ajourføring av data i SFKB via NGIS-OpenAPI
 version=0.1
 author=Norconsult Informasjonssystemer AS
 email=magne.tondel@norconsult.com
@@ -25,7 +25,7 @@ hasProcessingProvider=no
 # Tags are comma separated with spaces allowed
 tags=python
 
-#homepage=http://homepage
+homepage=https://github.com/kartverket/SFKB-QGISAPI-klient
 category=Plugins
 icon=icon.png
 # experimental flag
@@ -44,4 +44,3 @@ Category of the plugin: Raster, Vector, Database or Web
 
 # If the plugin can run on QGIS Server.
 server=False
-

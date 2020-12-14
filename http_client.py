@@ -30,21 +30,15 @@ class NgisHttpClient:
 
 
     def getAvailableDatasets(self):
-        try:
-            datasets = self.metadata_api_instance.get_datasets(self.x_client_product_version)
-            return datasets
-        except ApiException as e:
-            print("Exception when calling FeaturesApi->get_dataset_feature: %s\n" % e)
+        datasets = self.metadata_api_instance.get_datasets(self.x_client_product_version)
+        return datasets
     
     def getDatasetMetadata(self, dataset_id):
-        try:
-            dataset_metadata = self.metadata_api_instance.get_dataset_metadata(self.x_client_product_version, dataset_id)
-            return dataset_metadata
-        except ApiException as e:
-            print("Exception when calling FeaturesApi->get_dataset_feature: %s\n" % e)
+        dataset_metadata = self.metadata_api_instance.get_dataset_metadata(self.x_client_product_version, dataset_id)
+        return dataset_metadata
+
 
     def updateDatasetFeature(self, dataset_id, crs_epsg, body):
-
         self.features_api_instance.api_client.set_default_header("Accept", "application/vnd.kartverket.ngis.edit_features_summary+json")
         self.features_api_instance.api_client.set_default_header("Content-Type", "application/vnd.kartverket.sosi+json")
 
@@ -57,27 +51,26 @@ class NgisHttpClient:
         return feature
 
     def getDatasetFeatures(self, dataset_id, bbox, crs_epsg, limit=None, references='none'):
-        try:
-            bbox = bbox['ll']+bbox['ur']
-            bbox = ','.join(map(str, bbox))
+        
+        bbox = bbox['ll']+bbox['ur']
+        bbox = ','.join(map(str, bbox))
 
-            self.features_api_instance.api_client.set_default_header("Accept", "application/vnd.kartverket.sosi+json")
+        self.features_api_instance.api_client.set_default_header("Accept", "application/vnd.kartverket.sosi+json")
 
-            # Preconfigured limit
-            if limit:
-                return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, limit=limit, bbox=bbox, crs_epsg=crs_epsg)
-            # Use max limit provided by API
-            else:
-                return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, bbox=bbox, crs_epsg=crs_epsg)
-            # Paging required
-            while 'Link' in headers:
-                m = re.search('<(.+?)>', headers['Link'])
-                if m:
-                    url = m.group(1)
-                    queryparams = dict(parse.parse_qsl(parse.urlsplit(url).query))
-                    cursor = queryparams['cursor']
-                    paged_features, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, limit=limit, cursor=cursor, bbox=bbox, crs_epsg=crs_epsg)
-                    return_data['features'] = return_data['features'] + paged_features['features']
-            return return_data
-        except ApiException as e:
-            print("Exception when calling FeaturesApi->get_dataset_feature: %s\n" % e)
+        # Preconfigured limit
+        if limit:
+            return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, limit=limit, bbox=bbox, crs_epsg=crs_epsg)
+        # Use max limit provided by API
+        else:
+            return_data, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, bbox=bbox, crs_epsg=crs_epsg)
+        # Paging required
+        while 'Link' in headers:
+            m = re.search('<(.+?)>', headers['Link'])
+            if m:
+                url = m.group(1)
+                queryparams = dict(parse.parse_qsl(parse.urlsplit(url).query))
+                cursor = queryparams['cursor']
+                limit = queryparams['limit']
+                paged_features, _, headers = self.features_api_instance.get_dataset_features_with_http_info(self.x_client_product_version, dataset_id, references=references, limit=limit, cursor=cursor, bbox=bbox, crs_epsg=crs_epsg)
+                return_data['features'] = return_data['features'] + paged_features['features']
+        return return_data

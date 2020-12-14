@@ -215,9 +215,15 @@ class NgisOpenApiClient:
         self.client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
         #self.client = NgisHttpClient("https://qmsrest.westeurope.cloudapp.azure.com:8080/v1/", username, password)
 
-        datasets = self.client.getAvailableDatasets()
+        try:
+            datasets = self.client.getAvailableDatasets()
+        except Exception as e:
+            error = ApiError("Kunne ikke hente datasett", "Utlisting av datasett resulterte i en feil", e)  
+            self.iface.messageBar().pushMessage(error.title, error.detail, error.show_more, level=2, duration=10)
+            return 
+        
         if len(datasets) == 0:
-            self.dlg.statusLabel.setText("Kunne ikke hente datasett")
+            self.dlg.statusLabel.setText("Ingen datasett tilgjengelig")
             return
         
         self.dataset_dictionary = {dataset["name"]:dataset["id"] for dataset in datasets}
@@ -264,9 +270,14 @@ class NgisOpenApiClient:
         group = self.create_group(selected_name)
 
         # Get metadata and features from NgisOpenAPI
-        metadata_from_api = self.client.getDatasetMetadata(selected_id)
-        epsg = metadata_from_api.crs_epsg
-        features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
+        try:
+            metadata_from_api = self.client.getDatasetMetadata(selected_id)
+            epsg = metadata_from_api.crs_epsg
+            features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
+        except Exception as e:
+            error = ApiError("Nedlasting av data mislyktes", "Kunne ikke laste ned datasett", e)  
+            self.iface.messageBar().pushMessage(error.title, error.detail, error.show_more, level=2, duration=10)
+            return 
         crs_from_api = features_from_api['crs']['properties']['name']
         features_by_type = {}
         
@@ -383,17 +394,8 @@ class NgisOpenApiClient:
             feature_with_lock = self.client.getDatasetFeatureWithLock(datasetid, lokalid, crs_epsg, references)
             return feature_with_lock
         except Exception as e:
-            title = "Låsing mislyktes"
-            text = "Kunne ikke låse feature"
-            show_more = str(e)
-            try:
-                error_object = json.loads(e.body)
-                title = error_object['title'] if 'title' in error_object else None
-                text = error_object["detail"] if 'detail' in error_object else None
-                show_more = str(error_object["errors"]) if 'errors' in error_object else None
-            except:
-                pass
-            raise Exception(f'{title}: {show_more}')
+            error = ApiError("Låsing mislyktes", "Kunne ikke låse feature", e)  
+            raise Exception(f'{error.title}: {error.show_more}')
 
     def handle_changed_values(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
         
@@ -519,18 +521,9 @@ class NgisOpenApiClient:
             self.iface.messageBar().pushMessage("Success", "Endringene er lagret", str(return_data), level=3, duration=10)
             
         except Exception as e:
-           
-            title = "Lagring mislyktes"
-            text = "Kunne ikke lagre endringene"
-            show_more = str(e)
-            try:
-                error_object = json.loads(e.body)
-                title = error_object['title'] if 'title' in error_object else None
-                text = error_object["detail"] if 'detail' in error_object else None
-                show_more = str(error_object["errors"]) if 'errors' in error_object else None
-            except:
-                pass
-            self.iface.messageBar().pushMessage(title, text, show_more, level=2, duration=10)
+            error = ApiError("Lagring mislyktes", "Kunne ikke lagre endringene", e)
+            self.iface.messageBar().pushMessage(error.title, error.detail, error.show_more, level=2, duration=10)
+            return
 
     def run(self):
         """Run method that performs all the real work"""

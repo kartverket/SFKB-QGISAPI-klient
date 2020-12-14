@@ -178,3 +178,17 @@ def field_to_datetime(layer, field_idx):
     field_type = 'DateTime'
     widget_setup = QgsEditorWidgetSetup(field_type, config)
     layer.setEditorWidgetSetup(field_idx, widget_setup)
+
+class ApiError(object):
+    def __init__(self, title, detail, e):
+        self.title = title
+        self.detail = detail
+        self.show_more = str(e)
+
+        try:
+            error_object = json.loads(e.body)
+            self.title = error_object['title'] if 'title' in error_object else None
+            self.detail = error_object["detail"] if 'detail' in error_object else None
+            self.show_more = str(error_object["errors"]) if 'errors' in error_object else None
+        except:
+            pass

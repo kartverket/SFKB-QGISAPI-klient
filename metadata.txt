@@ -1,12 +1,14 @@
 [general]
 name=NGIS-OpenAPI Klient
 qgisMinimumVersion=3.0
-description=Programtillegg for ajourføring av data i SFKB via NGIS-OpenAPI
+description=This addon enables users to commit changes to the Norwegian base map (SFKB) using NGIS-OpenAPI
 version=0.1
 author=Norconsult Informasjonssystemer AS
 email=magne.tondel@norconsult.com
-about=Dette programtillegget muliggjør at autentiserte brukere av NGIS-OpenAPI kan laste ned tilgjengelige datasett og ajourføre kartobjekter direkte i SFKB.
-
+about=[English]
+      Authenticated users may add, replace or delete objects from SFKB using NGIS-OpenAPI
+      [Norsk]
+      Dette programtillegget muliggjør at autentiserte brukere av NGIS-OpenAPI kan laste ned tilgjengelige datasett og ajourføre kartobjekter direkte i SFKB.
 tracker=https://github.com/kartverket/SFKB-QGISAPI-klient/issues
 repository=https://github.com/kartverket/SFKB-QGISAPI-klient
 homepage=https://github.com/kartverket/SFKB-QGISAPI-klient

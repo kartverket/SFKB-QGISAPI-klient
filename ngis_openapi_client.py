@@ -208,12 +208,11 @@ class NgisOpenApiClient:
     def handle_login(self):
         auth = NgisOpenApiClientAuthentication()
         configId = self.dlg.mAuthConfigSelect.configId()
-        username, password = auth.getUser(configId)
+        url, username, password = auth.getConfig(configId)
         if not username:
             self.dlg.statusLabel.setText("Autentisering mislyktes")
             return
-        self.client = NgisHttpClient("https://openapi-test.kartverket.no/v1/", username, password)
-        #self.client = NgisHttpClient("https://qmsrest.westeurope.cloudapp.azure.com:8080/v1/", username, password)
+        self.client = NgisHttpClient(url, username, password) 
 
         try:
             datasets = self.client.getAvailableDatasets()

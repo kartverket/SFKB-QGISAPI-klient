@@ -2,7 +2,7 @@
 name=NGIS-OpenAPI Klient
 qgisMinimumVersion=3.0
 description=This addon enables users to commit changes to the Norwegian base map (SFKB) using NGIS-OpenAPI
-version=0.2
+version=0.3
 author=Norconsult Informasjonssystemer AS
 email=magne.tondel@norconsult.com
 about=[English]

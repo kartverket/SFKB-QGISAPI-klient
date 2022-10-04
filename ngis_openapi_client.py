@@ -23,7 +23,7 @@
 """
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate, QVariant
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox
+from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox, QInputDialog
 from qgis.utils import plugins
 from qgis.core import (
     QgsProject,
@@ -41,25 +41,42 @@ from qgis.core import (
     QgsEditorWidgetSetup,
     QgsCoordinateReferenceSystem,
     QgsMessageLog,
-    QgsFeatureRequest
+    QgsFeatureRequest,
+    QgsProcessingContext,
+    QgsTaskManager,
+    QgsTask,
+    QgsProcessingAlgRunnerTask,
+    Qgis,
+    QgsProcessingFeedback,
+    QgsApplication,
+    QgsMessageLog,
+    QgsField,
+    QgsGeometry,
+    QgsVectorLayerUtils
 )
+
 
 import json
 import uuid
 from .login import NgisOpenApiClientAuthentication
 from .http_client import NgisHttpClient
+import requests
 from .ngis_openapi_client_aux import *
+from .ngis_openapi_client_xsd_parser import *
 # Initialize Qt resources from file resources.py
 from .resources import *
 # Import the code for the dialog
 from .ngis_openapi_client_dialog import NgisOpenApiClientDialog
+from .ngis_openapi_client_input_dialog import NgisInputTypeDialog
 from xml.dom import minidom
 import os.path
+import re
+from osgeo import ogr
 
 
 class NgisOpenApiClient:
     """QGIS Plugin Implementation."""
-
+    
     def __init__(self, iface):
         """Constructor.
 
@@ -94,7 +111,9 @@ class NgisOpenApiClient:
         self.dataset_dictionary = {}
         self.feature_type_dictionary = {}
         self.layer_dictionary = {}
+        self.affected_features = {}
         self.client = None
+        self.xsd = []
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
         """Get the translation for a string using Qt translation API.
@@ -190,7 +209,7 @@ class NgisOpenApiClient:
         icon_path = ':/plugins/ngis_openapi_client/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'NGIS-OpenAPI Klient'),
+            text=self.tr(u'NGIS-OpenAPI Test'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
@@ -201,7 +220,7 @@ class NgisOpenApiClient:
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
-                self.tr(u'&NGIS-OpenAPI Klient'),
+                self.tr(u'&NGIS-OpenAPI Test'),
                 action)
             self.iface.removeToolBarIcon(action)
 
@@ -266,11 +285,24 @@ class NgisOpenApiClient:
         selected_id = self.dataset_dictionary[selected_name]
         
         # Group name equals selected dataset name
+        group_kodelister = self.create_group("Kodelister")
+        group_kodelister.setExpanded(0)
         group = self.create_group(selected_name)
+        
 
         # Get metadata and features from NgisOpenAPI
         try:
             metadata_from_api = self.client.getDatasetMetadata(selected_id)
+
+            #resp = requests.get(metadata_from_api.schema_url)
+            resp = requests.get('http://skjema.geonorge.no/SOSI/produktspesifikasjon/Havnedata/2.0/Havnedata.xsd', verify=False)
+            #resp = requests.get('https://havnedata.blob.core.windows.net/skjema/Havnedata_testdemo.xsd', verify=False)
+
+            self.xsd = parseXSD(resp.content)
+            #raise Exception()
+            #metadata_from_api.bbox['ur'] = [336509.55, 6578691.58]
+            #metadata_from_api.bbox['ll']=[270083.13, 6522356.34]
+
             epsg = metadata_from_api.crs_epsg
             features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
         except Exception as e:
@@ -286,6 +318,33 @@ class NgisOpenApiClient:
             features_by_type.setdefault(feature_type, []).append(feature)
         
         features_from_api['features'] = None
+
+
+
+        for typeNavn, typeVerdi in self.xsd.items():
+            for attrNavn, attrVerdi in typeVerdi.items():
+                if (attrVerdi.type == 'enum' and attrVerdi.maxOccurs > 1):
+                    vector_names = [l.name() for l in QgsProject().instance().mapLayers().values() if isinstance(l, QgsVectorLayer)]
+                    if attrNavn in vector_names: continue
+
+                    lyr = QgsVectorLayer('NoGeometry?crs=EPSG:4326&field=Verdi:string(40,0)', f'{attrNavn}', "memory")
+                    lyr.setCustomProperty("skipMemoryLayersCheck", 1) #13012022
+                    lyr.startEditing()
+                    l_d = lyr.dataProvider()
+                    fields = QgsFields()
+                    fields.append(QgsField('Verdi', QVariant.String, '', 254, 0))
+                    
+                    for val in attrVerdi.values:
+                        fet = QgsFeature()
+                        fet.setFields(fields)
+                        fet['Verdi']=val['value']
+                        l_d.addFeature(fet)
+
+
+                    lyr.commitChanges()
+                    QgsProject.instance().addMapLayer(lyr, False)
+                    group_kodelister.addLayer(lyr)
+        layers = {}                    
 
         for feature_type, features_list in features_by_type.items():
             # Create a new GeoJSON object containing a single featuretype
@@ -322,16 +381,55 @@ class NgisOpenApiClient:
                     
                     lyr.startEditing()
                     
-                    add_fields_to_layer(lyr, fields, feature_type)
-
+                    add_fields_to_layer(lyr, fields, feature_type, self.xsd)
+                    print(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}')   
                     lyr.commitChanges()
                     l_d = lyr.dataProvider()
-                    l_d.addFeatures(features)
+                    lyrfields = lyr.fields()
+
+                    for feature in features:
+                        fet = QgsFeature()
+                        fet.setGeometry(feature.geometry())
+
+                        attributes = feature.attributes()
+                        newDict = {}
+                        for idx, attribute in enumerate(attributes):
+                            xsd_def = self.xsd[feature_type].get(fields.at(idx).name(), None)
+                            
+                            oldfield = fields.at(idx)
+                            if xsd_def and feature.attributes()[idx] != None and xsd_def.type == "enum" and xsd_def.maxOccurs > 1:
+                                vals = feature.attributes()[idx][3:-1].split(",")
+                                vals = ','.join(vals)
+                                newDict[oldfield.name()] = f'{{{vals}}}'
+
+
+                            else:
+                                try:
+                                    obj = json.loads(attribute)
+                                    for key, value in obj.items():
+                                        newDict[key] = value
+                                except:
+                                    newDict[oldfield.name()] = feature.attributes()[idx]
+
+                        fieldOrder = {}
+                        fet.initAttributes(len(lyrfields))
+                        for fieldName in newDict.keys():
+                            newIdx = lyrfields.indexFromName(fieldName)
+                            fieldOrder[fieldName] = newIdx
+                            print(f'{newIdx} - {newDict[fieldName]}')
+                            try:
+                                fet.setAttribute(newIdx, newDict[fieldName])
+                            except Exception as e:
+                                print(e)
+                        l_d.addFeature(fet)
+
+                    
                     # update the extent of rev_lyr
                     lyr.updateExtents()
                     # save changes made in 'rev_lyr'
                     lyr.commitChanges()
-                    group.addLayer(lyr)
+                    layers[lyr.name()] = lyr
+                    
                    
                     #lyr.committedFeaturesAdded.connect(self.handleCommitedAddedFeatures)
                     #lyr.committedFeaturesRemoved.connect(self.handleCommittedFeaturesRemoved)
@@ -339,13 +437,18 @@ class NgisOpenApiClient:
                     #lyr.committedGeometriesChanges(self.ee)
                     
                     lyr.beforeCommitChanges.connect(self.handle_before_commitchanges)
+                    lyr.featureAdded.connect(self.handle_feature_added)
+                    lyr.geometryChanged.connect(self.handle_geometry_change)
 
                     if feature_type in slds:
                         lyr.loadSldStyle(slds[feature_type])
 
                     self.dataset_dictionary[lyr.id()] = selected_id
                     self.feature_type_dictionary[lyr.id()] = feature_type
-    
+            
+        for layername in sorted(list(layers.keys())):
+            group.addLayer(layers[layername])
+
     def get_sld(self):
         sld_dict = {}
         folder_name = f"{os.path.dirname(__file__)}/styles"
@@ -363,6 +466,75 @@ class NgisOpenApiClient:
                             break
         return sld_dict
 
+    def handle_feature_added(self, fid):
+        layer = self.iface.activeLayer()
+        added_feature = layer.getFeature(fid)
+
+        #ignore commited features
+        if added_feature.id() > 0: 
+            return
+
+        #Polygon
+        if added_feature.geometry().type() == 2:
+            new_feature = self.feature_to_geojson(layer, added_feature)
+            new_feature['update'] = {"action":"Create"}
+            
+            lokalid = str(uuid.uuid4())
+            added_feature.setAttribute('lokalid', lokalid)
+            layer.updateFeature(added_feature)
+
+            new_feature["properties"]["identifikasjon"]["lokalId"] = lokalid
+
+            url = 'https://ngis-felleskomponent-test.azurewebsites.net/createGeometry'
+            body = {'feature': new_feature}
+
+            x = requests.post(url, json = body)
+
+            affected_features = json.loads(x.text)
+
+            for feature in affected_features["affectedFeatures"]:
+                self.affected_features[feature['properties']['identifikasjon']['lokalId']] = feature
+
+            options = list(self.feature_type_dictionary.values())
+            dialog = NgisInputTypeDialog(options)
+
+            #TODO Fix
+            avgrensingFeature = affected_features["affectedFeatures"][1]
+
+            if dialog.ok:
+                layerName = next(key for key, value in self.feature_type_dictionary.items() if value == dialog.item)
+                lineLayer = QgsProject.instance().mapLayers()[layerName]
+                lineLayer.startEditing()
+
+                geom = ogr.CreateGeometryFromJson(json.dumps(avgrensingFeature['geometry']))
+                geom = QgsGeometry.fromWkt(geom.ExportToWkt())
+
+                dataProvider = lineLayer.dataProvider()
+                #elem = QgsFeature()
+                #elem.setGeometry(geom)
+
+                feat = QgsVectorLayerUtils.createFeature(lineLayer, geom, {}, lineLayer.createExpressionContext() )
+
+                
+                feat.setAttribute('lokalid', avgrensingFeature['properties']['identifikasjon']['lokalId'])
+                lineLayer.updateFeature(feat)
+
+                tbl = self.iface.openFeatureForm(lineLayer, feat, False)
+                if tbl == True:
+                    dataProvider.addFeature(feat)
+                    lineLayer.endEditCommand()
+                
+                lineLayer.addFeature(feat)
+
+
+            print("Hallo")
+
+    def handle_geometry_change(self, fid, geometry):
+        print("geometryChanged")
+        
+        layer = self.iface.activeLayer()
+        added_feature = layer.getFeature(fid)
+
     def handle_before_commitchanges(self):
         
         layer = self.iface.activeLayer()
@@ -375,17 +547,17 @@ class NgisOpenApiClient:
             changed_attribute_values = layer.editBuffer().changedAttributeValues()
 
             try:
-                features = []
-                features = features + self.handle_committed_features_removed(layer, features_deleted)
-                features = features + self.handle_committed_features_added(layer, features_added)
-                features = features + self.handle_changed_values(layer, changed_attribute_values, changed_geometries, ids_deleted)
+                features = {}
+                features.update(self.handle_committed_features_removed(layer, features_deleted))
+                features.update(self.handle_committed_features_added(layer, features_added))
+                features.update(self.handle_changed_values(layer, changed_attribute_values, changed_geometries, ids_deleted))
                 
-                self.handle_altered_features(layer, features)
+                self.handle_altered_features(layer, list(features.values()))
             except Exception as e:
                 self.iface.messageBar().pushMessage("Lagring mislyktes", "" , str(e), level=2, duration=10)
 
     def lock_feature(self, lyr, changed_feature, references='none'):
-        lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+        lokalid = changed_feature.attribute('lokalid')
         datasetid = self.dataset_dictionary[lyr.id()]
         crs = lyr.crs().authid()
         crs_epsg = authid_to_code(crs)
@@ -398,41 +570,38 @@ class NgisOpenApiClient:
 
     def handle_changed_values(self, lyr, changed_attribute_values, changed_geometries, ids_deleted):
         
-        features = []
+        features = {}
         for fid, attributes in changed_attribute_values.items():
             
             if fid in ids_deleted: continue
 
             changed_feature = lyr.getFeature(fid)
-            lokalid = json.loads(changed_feature.attribute('identifikasjon'))["lokalId"]
+            lokalid = changed_feature.attribute('lokalId')
             if lyr.geometryType() == QgsWkbTypes.PolygonGeometry or lyr.geometryType() == QgsWkbTypes.LineGeometry:
                 feature_with_lock = self.lock_feature(lyr, changed_feature, 'direct')
             else:
                 feature_with_lock = self.lock_feature(lyr, changed_feature)
-
+            
             for idx, feature in enumerate(feature_with_lock["features"]):
                 if feature["properties"]["identifikasjon"]["lokalId"] == lokalid:
 
-                    for attribute_idx, attribute in attributes.items():
-                        attribute_name = lyr.dataProvider().fields().field(attribute_idx).name()
-                        if type(attribute) == QDate:
-                            attribute_value = attribute.toString("yyyy-MM-dd")
-                        else:
-                            attribute_value = try_parse_json(attribute)
-                        
-                        updated = {attribute_name : attribute_value}
-                        feature_with_lock["features"][idx]["properties"].update(updated)
-                
-                    if fid in changed_geometries:
-                        geometry = changed_geometries[fid]
-                        feature_with_lock['features'][idx]['geometry'] = json.loads(geometry.asJson())
-                        changed_geometries.pop(fid)
-
-                    feature_with_lock["features"][idx]['update'] = {'action': 'Replace'}
+                    new_feature = self.feature_to_geojson(lyr, changed_feature)
+                    new_feature['update'] = {'action': 'Replace'}
+                    
+                    if 'geometry_properties' in feature : 
+                        new_feature['geometry_properties'] = feature['geometry_properties']
+                        #interiors = feature['geometry_properties']['interiors'] if 'interiors' in feature['geometry_properties'] else []
+                        #exterior = feature['geometry_properties']['exterior'] if 'exterior' in feature['geometry_properties'] else []
+                    features[lokalid] = new_feature
                 # If editing line attribute, and there is a feature with geometry_properties set, replace it also (should be polygon)
-                elif "geometry_properties" in feature_with_lock["features"][idx]:
-                    feature_with_lock["features"][idx]['update'] = {'action': 'Replace'}
-                features = features + [feature_with_lock["features"][idx]]
+                elif "geometry_properties" in feature:
+                    feature['update'] = {'action': 'Replace'}
+                    id = feature["properties"]["identifikasjon"]["lokalId"]
+                    features[id] = feature
+                else:
+                    id = feature["properties"]["identifikasjon"]["lokalId"]
+                    features[id] = feature
+                    
         
         for fid, geometry in changed_geometries.items():
             
@@ -440,63 +609,158 @@ class NgisOpenApiClient:
 
             changed_feature = lyr.getFeature(fid)
 
-            # TODO support for delt geometri
-            feature_with_lock = self.lock_feature(lyr, changed_feature)
-
-            feature_with_lock['features'][0]['geometry'] = json.loads(geometry.asJson())
+            lokalid = changed_feature.attribute('lokalid')
             
-            feature_with_lock['features'][0]['update'] = {'action': 'Replace'}
-            features = features + feature_with_lock["features"]
-        
+            new_geometry = json.loads(geometry.asJson())
+
+            if lokalid in features:
+                features[lokalid]['geometry'] = new_geometry
+            else:
+                # TODO support for delt geometri
+                feature_with_lock = self.lock_feature(lyr, changed_feature)
+
+                feature_with_lock['features'][0]['geometry'] = new_geometry
+                
+                feature_with_lock['features'][0]['update'] = {'action': 'Replace'}
+                
+                #TODO if key in dict, update only geom
+
+                features.update({ feature['properties']['identifikasjon']['lokalId'] : feature for feature in feature_with_lock["features"] })
+
         return features
 
     def handle_committed_features_removed(self, lyr, deleted_features):
         
-        features = []
+        features = {}
         for deleted_feature in deleted_features:
             
             feature_with_lock = self.lock_feature(lyr, deleted_feature)
-
             feature_with_lock['features'][0]['update'] = {'action': 'Erase'}
-            features = features + feature_with_lock["features"]
+            
+            features.update({ feature['properties']['identifikasjon']['lokalId'] : feature for feature in feature_with_lock["features"] })
+        
         return features
 
+    def feature_to_geojson(self, lyr, feature):
+        export = QgsJsonExporter(lyr)
+        export.setSourceCrs(QgsCoordinateReferenceSystem())
+        
+        xsd_entry = self.xsd[self.feature_type_dictionary[lyr.id()]]
+        feature_json = json.loads(export.exportFeature(feature))
+        
+        new_feature = {
+            "geometry" : feature_json["geometry"]
+        }
+
+        properties = {}
+        for ele, val in xsd_entry.items():
+            
+            if ele in feature_json["properties"]:
+                value = feature_json["properties"][ele]
+                if value is not None:
+                    if val.type == "integer":
+                        value = int(value)
+                    elif val.type == "double":
+                        value = float(value)
+                    elif val.type == "enum":
+                        if val.maxOccurs > 1:
+                            value = value[1:-1].split(", ") if len(value[1:-1]) > 0 else []
+                        else:
+                            val_list = [a["type"] for a in val.values]
+                            try:
+                                position = val_list.index(value)
+                                value = val.values[position]["value"]
+                            except Exception:
+                                continue
+
+                    if len(val.xmlPath) > 0:
+                        if val.xmlPath[0] in properties:
+                            properties[val.xmlPath[0]][ele] = value
+                        else:
+                            properties[val.xmlPath[0]] = {
+                                ele : value
+                            }
+                    else:
+                        properties[ele] = value
+        
+        properties["featuretype"] = self.feature_type_dictionary[lyr.id()]
+        new_feature["properties"] = properties
+        return new_feature
+
     def handle_committed_features_added(self, lyr, added_features):
-        features = []
+        
+        #TODO Husk å committe features som er referert i andre lag så ikke lagre-knappen er mulig å trykke på for allerede innsjekkede features
+        
+        features = {}
+        print(self.xsd)
         for fid, feature in added_features.items():
             
-            export = QgsJsonExporter(lyr)
-            export.setSourceCrs(QgsCoordinateReferenceSystem())
-            
-            identifikasjon_idx = feature.fieldNameIndex('identifikasjon')
-            
-            try:
-                identifikasjon_value = json.loads(feature.attribute('identifikasjon'))
-            except Exception:
-                raise Exception("Kunne ikke tolke identifikasjonsattributtet")
+            new_feature = self.feature_to_geojson(lyr, feature)
 
-            identifikasjon_value["lokalId"] = str(uuid.uuid4())
-            feature.setAttribute('identifikasjon', identifikasjon_value)
-
-            feature.setAttribute('featuretype', self.feature_type_dictionary[lyr.id()])
-            feature_json = json.loads(export.exportFeature(feature))
+            lokalid = new_feature["properties"]["identifikasjon"]["lokalId"]
             
-            # Don't include null values in json, Ngis open API doesn't like it
-            prop_for_deletion = []
-            for property_name, property_value in feature_json['properties'].items():
-                if not property_value:
-                    prop_for_deletion.append(property_name)
-                else:
-                    feature_json['properties'][property_name] = try_parse_json(property_value)
-            for prop in prop_for_deletion:
-                del feature_json['properties'][prop]
-            
-            feature_json['update'] = {"action":"Create"}
-            features.append(feature_json)
+            if lokalid in self.affected_features:
+                #Har kommet fra felleskomponent, skal ha id allerede, må derfor ikke autogenerere ny id her
+                featureFromFelleskomponent = self.affected_features[lokalid]
+                new_feature['geometry_properties'] = featureFromFelleskomponent['geometry_properties']
+                new_feature['update'] = featureFromFelleskomponent['update']
 
+                exterior = new_feature['geometry_properties'].get('exterior', [])
+                interior = new_feature['geometry_properties'].get('interior', [])
+
+                references = exterior + interior
+
+                layers = QgsProject.instance().mapLayers()
+
+                for reference in references:
+                    done = False
+                    if reference not in self.affected_features:
+                        raise Exception("Not yet implemented, uncertain if this is a use case")
+                    
+                    affected_feature = self.affected_features[reference]
+
+                    for layer_id, layer in layers.items():
+                        if done:
+                            break
+                        else:
+                            if layer.editBuffer() is not None:
+                                print("ok")
+                                addedFeaturesInThisLayer = list(layer.editBuffer().addedFeatures().values())
+                                for added_feature in addedFeaturesInThisLayer:
+                                    affectedGeojsonFeature = self.feature_to_geojson(layer, added_feature)
+                                    affectedLokalid = affectedGeojsonFeature["properties"]["identifikasjon"]["lokalId"]
+                                    
+                                    if affectedLokalid == reference:
+                                        #We found referenced geometry in another layer
+                                        
+                                        geometryProperties = affected_feature.get('geometry_properties', None)
+                                        if geometryProperties is not None:
+                                            affectedGeojsonFeature['geometry_properties'] = affected_feature['geometry_properties']
+
+                                        affectedGeojsonFeature['update'] = affected_feature['update']
+                                        
+                                        features[reference] = affectedGeojsonFeature
+                                        done = True
+                                        break
+
+                features[lokalid] = new_feature
+
+                    
+
+                
+
+
+
+            else:
+                lokalid = str(uuid.uuid4())
+                new_feature["properties"]["identifikasjon"]["lokalId"] = lokalid
+                lyr.updateFeature(feature)
+                new_feature['update'] = {"action":"Create"}
+                features[lokalid] = new_feature
+            
             # Update QGIS layer with new uuid, must be string (not json)
-            feature.setAttribute('identifikasjon', json.dumps(identifikasjon_value))
-            lyr.updateFeature(feature)
+            feature.setAttribute('lokalid', lokalid)
+            
 
         return features
 
@@ -517,7 +781,7 @@ class NgisOpenApiClient:
 
             datasetid = self.dataset_dictionary[lyr.id()]
             return_data = self.client.updateDatasetFeature(datasetid, crs_epsg, json_dict)
-            self.iface.messageBar().pushMessage("Success", "Endringene er lagret", str(return_data), level=3, duration=10)
+            self.iface.messageBar().pushMessage("Success", f"{lyr.name()}: Endringene er lagret", str(return_data), level=3, duration=10)
             
         except Exception as e:
             error = ApiError("Lagring mislyktes", "Kunne ikke lagre endringene", e)

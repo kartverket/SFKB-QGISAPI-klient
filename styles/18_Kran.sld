@@ -131,28 +131,6 @@
             </se:Graphic>
           </se:PointSymbolizer>
         </se:Rule>
-        <se:Rule>
-          <se:Name></se:Name>
-          <!--Parser Error: 
-syntax error, unexpected ELSE - Expression was: ELSE-->
-          <se:MinScaleDenominator>0</se:MinScaleDenominator>
-          <se:MaxScaleDenominator>5000</se:MaxScaleDenominator>
-          <se:PointSymbolizer>
-            <se:Graphic>
-              <se:Mark>
-                <se:WellKnownName>circle</se:WellKnownName>
-                <se:Fill>
-                  <se:SvgParameter name="fill">#e9362c</se:SvgParameter>
-                </se:Fill>
-                <se:Stroke>
-                  <se:SvgParameter name="stroke">#232323</se:SvgParameter>
-                  <se:SvgParameter name="stroke-width">0.5</se:SvgParameter>
-                </se:Stroke>
-              </se:Mark>
-              <se:Size>7</se:Size>
-            </se:Graphic>
-          </se:PointSymbolizer>
-        </se:Rule>
       </se:FeatureTypeStyle>
     </UserStyle>
   </NamedLayer>

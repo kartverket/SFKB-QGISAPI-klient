@@ -1,3 +1,6 @@
 __pycache__/
 # ignore an entire directory
 /.vs/
+.vscode/
+styles_v2/
+havnedata2_symboler/

@@ -78,6 +78,10 @@
                 <ogc:PropertyName>FENDERTYPE</ogc:PropertyName>
                 <ogc:Literal>hjulfender</ogc:Literal>
               </ogc:PropertyIsEqualTo>
+              <ogc:PropertyIsEqualTo>
+                <ogc:PropertyName>FENDERTYPE</ogc:PropertyName>
+                <ogc:Literal>dekkfendering</ogc:Literal>
+              </ogc:PropertyIsEqualTo>
             </ogc:Or>
           </ogc:Filter>
           <se:MinScaleDenominator>0</se:MinScaleDenominator>
@@ -307,28 +311,6 @@
                 </se:Stroke>
               </se:Mark>
               <se:Size>14</se:Size>
-            </se:Graphic>
-          </se:PointSymbolizer>
-        </se:Rule>
-        <se:Rule>
-          <se:Name></se:Name>
-          <!--Parser Error: 
-syntax error, unexpected ELSE - Expression was: ELSE-->
-          <se:MinScaleDenominator>0</se:MinScaleDenominator>
-          <se:MaxScaleDenominator>1000</se:MaxScaleDenominator>
-          <se:PointSymbolizer>
-            <se:Graphic>
-              <se:Mark>
-                <se:WellKnownName>circle</se:WellKnownName>
-                <se:Fill>
-                  <se:SvgParameter name="fill">#9c52d9</se:SvgParameter>
-                </se:Fill>
-                <se:Stroke>
-                  <se:SvgParameter name="stroke">#232323</se:SvgParameter>
-                  <se:SvgParameter name="stroke-width">0.5</se:SvgParameter>
-                </se:Stroke>
-              </se:Mark>
-              <se:Size>7</se:Size>
             </se:Graphic>
           </se:PointSymbolizer>
         </se:Rule>

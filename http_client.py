@@ -23,7 +23,7 @@ class NgisHttpClient:
         self.configuration.password=password
         # DEBUG FIDDLER
         #self.configuration.proxy = "https://127.0.0.1:8888"
-        #self.configuration.verify_ssl = False
+        self.configuration.verify_ssl = False
         
         self.metadata_api_instance = swagger_client.MetadataApi(swagger_client.ApiClient(self.configuration))
         self.features_api_instance = swagger_client.FeaturesApi(swagger_client.ApiClient(self.configuration))

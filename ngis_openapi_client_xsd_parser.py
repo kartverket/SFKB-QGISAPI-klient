@@ -64,6 +64,7 @@ def add_sekvens(sekvens, schemaPath, session):
                 elementTypeNamespace, elementTypeName = elements[refTypeName].split(':', 1)
                 print(f"Referer til {element} ({elementTypeName})")
                 ele = XsdElement(refTypeName,elementTypeNamespace, elementTypeName)
+                # Add extra attribute for list of complex elements here? (maton, 31.10.2022)
                 result.extend(utled_egenskaper(ele, schemaPath, True, session))
             else:
                 elementName = element.attrib.get('name', None)

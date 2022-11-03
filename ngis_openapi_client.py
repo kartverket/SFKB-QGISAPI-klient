@@ -445,11 +445,14 @@ class NgisOpenApiClient:
                             
                             oldfield = fields.at(idx)
                             if xsd_def and feature.attributes()[idx] != None and xsd_def.type == "enum" and xsd_def.maxOccurs > 1:
-                                vals = feature.attributes()[idx][3:-1].split(",")
+                                vals = feature.attributes()[idx][3:-1]
+                                
+                                if isinstance(vals, list) == False:
+                                    vals = feature.attributes()[idx][3:-1].split(",")
+                                
                                 vals = ','.join(vals)
                                 newDict[oldfield.name()] = f'{{{vals}}}'
-
-
+                                
                             else:
                                 try:
                                     obj = json.loads(attribute)
@@ -871,12 +874,22 @@ class NgisOpenApiClient:
                                 continue
 
                     if len(val.xmlPath) > 0:
+                        # Only one complex-element (maton, 01.11.2022)
+                        # if (val.xmlPath[0] == 'identifikasjon' or val.xmlPath[0] == 'kvalitet'):
                         if val.xmlPath[0] in properties:
                             properties[val.xmlPath[0]][ele] = value
                         else:
                             properties[val.xmlPath[0]] = {
                                 ele : value
                             }
+                        # Assuming multiple complex elements 
+                        #else:
+                        #    if val.xmlPath[0] in properties:
+                        #        properties[val.xmlPath[0]][0][ele] = value
+                        #    else:
+                        #        properties[val.xmlPath[0]] = [{
+                        #            ele : value
+                        #        }]
                     else:
                         properties[ele] = value
         

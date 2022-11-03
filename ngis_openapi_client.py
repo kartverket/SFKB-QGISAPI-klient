@@ -110,8 +110,10 @@ class NgisOpenApiClient:
         self.first_start = None
         self.dataset_dictionary = {}
         self.feature_type_dictionary = {}
+        self.selected_features_dictionary = {}
         self.layer_dictionary = {}
         self.affected_features = {}
+        self.affected_features_to_layer = {}
         self.client = None
         self.xsd = []
     # noinspection PyMethodMayBeStatic
@@ -276,6 +278,51 @@ class NgisOpenApiClient:
             group = root.insertGroup(0, name)
         return group
 
+    def handle_make_polygon_from_line(self):
+        
+        features = []
+
+        for layer_id, fids in self.selected_features_dictionary.items():
+
+            lineLayer = QgsProject.instance().mapLayers()[layer_id]
+
+            for fid in fids:
+            
+                line_feature = lineLayer.getFeature(fid)
+                new_feature = self.feature_to_geojson(lineLayer, line_feature)
+
+                features.append(new_feature)
+
+        if len(features) == 0: return
+
+        url = 'https://ngis-felleskomponent-test.azurewebsites.net/polygonFromLines'
+        
+        body = {'features': features}
+
+        x = requests.post(url, json = body)
+
+        topology_responses = json.loads(x.text)
+
+        added_polygons = {}
+
+        for topology_response in topology_responses:
+
+            for feature in topology_response["affectedFeatures"]:
+                action = feature.get("update", {}).get("action", None)
+                if action is not None:
+                    # Felleskomponenten endrer ikke status på uberørte features. Hvis de er endret tidligere men ikke i denne transaksjonen beholder de sin status.
+                    added_polygons[feature['properties']['identifikasjon']['lokalId']] = feature
+                
+                # Legger inn alle affected features fra felleskomponenten, disse trengs ved innsjekk til NGIS-OpenAPI #TODO CONFIRM   
+                self.affected_features[feature['properties']['identifikasjon']['lokalId']] = feature
+
+        for lokalid, feature in added_polygons.items():
+            options = list(self.feature_type_dictionary.values())
+            self.prompt_new_feature(feature, options)
+
+        print(len(lineLayer))
+
+
     def handle_add_layer(self):
         """Create a new layer by name (rev_lyr)"""
 
@@ -436,9 +483,13 @@ class NgisOpenApiClient:
                     #lyr.featuresDeleted.connect(self.handleDeletedFeatures)
                     #lyr.committedGeometriesChanges(self.ee)
                     
+                    self.layer_dictionary[lyr.id()] = lyr
+
                     lyr.beforeCommitChanges.connect(self.handle_before_commitchanges)
                     lyr.featureAdded.connect(self.handle_feature_added)
+                    #Legge inn disse i en array, eller loope igjennom alle lag etter uncommited features?
                     lyr.geometryChanged.connect(self.handle_geometry_change)
+                    lyr.selectionChanged.connect(self.handle_selection_change)
 
                     if feature_type in slds:
                         lyr.loadSldStyle(slds[feature_type])
@@ -466,22 +517,47 @@ class NgisOpenApiClient:
                             break
         return sld_dict
 
+    def is_valid_uuid(self, value):
+        try:
+            uuid.UUID(str(value))
+
+            return True
+        except ValueError:
+            return False
+
     def handle_feature_added(self, fid):
-        layer = self.iface.activeLayer()
-        added_feature = layer.getFeature(fid)
 
         #ignore commited features
-        if added_feature.id() > 0: 
+        if fid > 0: 
             return
+
+        #identify which layer this feature is temporary saved in
+        added_feature = None
+        layer = None
+
+        for layerName, layerObject in QgsProject.instance().mapLayers().items():
+            if layerObject.getFeature(fid).isValid():
+                added_feature = layerObject.getFeature(fid)
+                layer = layerObject
+                break
+        #ignore features not found in any layer, should not happen
+        if added_feature is None:
+            return
+
+        lokalid = added_feature["lokalid"]
+        if not self.is_valid_uuid(lokalid):
+            lokalid = str(uuid.uuid4())
+            added_feature.setAttribute('lokalid', lokalid)
+            layer.updateFeature(added_feature)
+
+        if lokalid in self.affected_features:
+            return
+
 
         #Polygon
         if added_feature.geometry().type() == 2:
             new_feature = self.feature_to_geojson(layer, added_feature)
             new_feature['update'] = {"action":"Create"}
-            
-            lokalid = str(uuid.uuid4())
-            added_feature.setAttribute('lokalid', lokalid)
-            layer.updateFeature(added_feature)
 
             new_feature["properties"]["identifikasjon"]["lokalId"] = lokalid
 
@@ -495,45 +571,161 @@ class NgisOpenApiClient:
             for feature in affected_features["affectedFeatures"]:
                 self.affected_features[feature['properties']['identifikasjon']['lokalId']] = feature
 
-            options = list(self.feature_type_dictionary.values())
-            dialog = NgisInputTypeDialog(options)
-
             #TODO Fix
-            avgrensingFeature = affected_features["affectedFeatures"][1]
+            avgrensing_feature = affected_features["affectedFeatures"][1]
 
-            if dialog.ok:
-                layerName = next(key for key, value in self.feature_type_dictionary.items() if value == dialog.item)
-                lineLayer = QgsProject.instance().mapLayers()[layerName]
-                lineLayer.startEditing()
+            options = list(self.feature_type_dictionary.values())
 
-                geom = ogr.CreateGeometryFromJson(json.dumps(avgrensingFeature['geometry']))
-                geom = QgsGeometry.fromWkt(geom.ExportToWkt())
+            self.prompt_new_feature(avgrensing_feature, options)
+            
 
-                dataProvider = lineLayer.dataProvider()
-                #elem = QgsFeature()
-                #elem.setGeometry(geom)
+    def prompt_new_feature(self, feature_geojson, prompt_options):
+        
+        dialog = NgisInputTypeDialog(prompt_options)
 
-                feat = QgsVectorLayerUtils.createFeature(lineLayer, geom, {}, lineLayer.createExpressionContext() )
+        if dialog.ok:
+            layerName = next(key for key, value in self.feature_type_dictionary.items() if value == dialog.item)
+            lineLayer = QgsProject.instance().mapLayers()[layerName]
+            
+            # Create feature in map and open attribute form
+            return self.create_new_feature_with_attribute_form(lineLayer, feature_geojson)
 
-                
-                feat.setAttribute('lokalid', avgrensingFeature['properties']['identifikasjon']['lokalId'])
-                lineLayer.updateFeature(feat)
+    def create_new_feature_with_attribute_form(self, lyr, feature_geojson):
+        
+        lyr.startEditing()
 
-                tbl = self.iface.openFeatureForm(lineLayer, feat, False)
-                if tbl == True:
-                    dataProvider.addFeature(feat)
-                    lineLayer.endEditCommand()
-                
-                lineLayer.addFeature(feat)
+        geom = ogr.CreateGeometryFromJson(json.dumps(feature_geojson['geometry']))
+        geom = QgsGeometry.fromWkt(geom.ExportToWkt())
 
+        dataProvider = lyr.dataProvider()
 
-            print("Hallo")
+        feat = QgsVectorLayerUtils.createFeature(lyr, geom, {}, lyr.createExpressionContext() )
+
+        
+        feat.setAttribute('lokalid', feature_geojson['properties']['identifikasjon']['lokalId'])
+        lyr.updateFeature(feat)
+
+        tbl = self.iface.openFeatureForm(lyr, feat, False)
+        if tbl == True:
+            dataProvider.addFeature(feat)
+            lyr.endEditCommand()
+        
+        lyr.addFeature(feat)
+        return lyr, feat
+
+    def find_ngis_feature_in_canvas(self, ngis_feature):
+        lokalid = ngis_feature.get("properties", {}).get("identifikasjon", {}).get("lokalId", None)
+        featureType = ngis_feature.get("properties", {}).get("featuretype", None)
+        for layerId, featureTypeName in self.feature_type_dictionary.items():
+            if featureTypeName == featureType:
+                matchLayer = self.layer_dictionary[layerId]
+                features_in_layer = matchLayer.getFeatures()
+                for layerFeature in features_in_layer:
+                    if layerFeature["lokalid"] == lokalid:
+                        print(f"fant {lokalid} in {matchLayer.id()}, {layerFeature.geometry().type()}")
+                        return matchLayer, layerFeature
 
     def handle_geometry_change(self, fid, geometry):
         print("geometryChanged")
         
+        layers = QgsProject.instance().mapLayers()
+
+        for layer_id, layer in layers.items():
+            if not isinstance(layer, QgsVectorLayer): continue
+
+            editBuffer = layer.editBuffer()
+            if editBuffer is not None:
+                changed_geometries = editBuffer.changedGeometries()
+                if fid in changed_geometries and geometry.asJson() == changed_geometries[fid].asJson():
+                    #Feature identified in layer, TODO must be a better way to do this
+                    new_feature = layer.getFeature(fid)
+                    old_feature = list(layer.dataProvider().getFeatures( QgsFeatureRequest( fid ) ))[0]
+                    ngis_openapi_result = self.lock_feature(layer, old_feature, 'direct')
+                    referenced_features = []
+                    feature_from_ngis_openapi = ngis_openapi_result.get("features", [])
+                    for feature in feature_from_ngis_openapi:
+                        canvas_lyr, feature_in_canvas = self.find_ngis_feature_in_canvas(feature)
+                        feature_in_canvas_json = self.feature_to_geojson(canvas_lyr, feature_in_canvas)
+                        
+                        geometry_properties = feature.get("geometry_properties", None)
+                        if geometry_properties is not None:
+                            feature_in_canvas_json["geometry_properties"] = geometry_properties
+
+                        referenced_features.append(feature_in_canvas_json)
+
+                    url = 'https://ngis-felleskomponent-test.azurewebsites.net/editLine'
+        
+                    body = {
+                        'feature': self.feature_to_geojson(layer, old_feature),
+                        'newFeature': self.feature_to_geojson(layer, new_feature),
+                        'affectedFeatures' : referenced_features
+                        }
+                    
+                    x = requests.post(url, json = body)
+            
+                    topology_response = json.loads(x.text)
+
+                    affected_features = topology_response.get("affectedFeatures", [])
+
+                    #TODO add to self.affected
+                    features_to_be_replaced = []
+                    for feature in affected_features:
+                        lokalid = feature.get("properties", {}).get("identifikasjon", {}).get("lokalId", None)
+                        action = feature.get("update", {}).get("action", None)
+                        if action == "Replace":
+                            features_to_be_replaced.append(feature)
+                        self.affected_features[lokalid] = feature
+
+                    for featurePendingReplacement in features_to_be_replaced:
+                        lokalid = featurePendingReplacement.get("properties", {}).get("identifikasjon", {}).get("lokalId", None)
+                        featureType = featurePendingReplacement.get("properties", {}).get("featuretype", None)
+                        new_geometry = featurePendingReplacement.get("geometry", None)
+                        
+                        for layerId, featureTypeName in self.feature_type_dictionary.items():
+                            if featureTypeName == featureType:
+                                matchLayer = self.layer_dictionary[layerId]
+                                features_in_layer = matchLayer.getFeatures()
+
+                                for layerFeature in features_in_layer:
+                                    geom = layerFeature.geometry()
+                                    if layerFeature["lokalid"] == lokalid:
+                                        
+                                        matchLayer.geometryChanged.disconnect(self.handle_geometry_change)
+                                        matchLayer.startEditing()
+                                        geom = ogr.CreateGeometryFromJson(json.dumps(new_geometry))
+                                        geom = QgsGeometry.fromWkt(geom.ExportToWkt())
+                                        layerFeature.setGeometry(geom)
+                                        matchLayer.updateFeature(layerFeature)
+                                        matchLayer.geometryChanged.connect(self.handle_geometry_change)
+                                        break
+                                        print("Found feature to replace geometry")
+
+                    
+                    print(f"layer: {layer.id()}, fid: {fid}")
+
+            #print(f"layer: {layer.id()}, fid: {fid}")
+            #added_feature = layer.getFeature(fid)
+
+    def handle_selection_change(self, selected_fids, deselected_fids, clear_and_select):
         layer = self.iface.activeLayer()
-        added_feature = layer.getFeature(fid)
+        print(f"selectionChanged! Layer: {layer.name(),}, Selected: {selected_fids}, Deselected: {deselected_fids}, ClearAndSelect: {clear_and_select}" )
+
+        if not clear_and_select:
+            raise Exception("ClearAndSelect == False - Not implemented")
+        
+        #feature_type_name = self.feature_type_dictionary[layer.id()]
+        
+        self.selected_features_dictionary[layer.id()] = selected_fids
+        
+        fid_count = 0
+        for fid_list in self.selected_features_dictionary.values():
+            fid_count += len(fid_list)
+
+        if fid_count > 0:
+            self.dlg.polyFromLineButton.setEnabled(True)
+        else:
+            self.dlg.polyFromLineButton.setEnabled(False)
+
 
     def handle_before_commitchanges(self):
         
@@ -552,6 +744,8 @@ class NgisOpenApiClient:
                 features.update(self.handle_committed_features_added(layer, features_added))
                 features.update(self.handle_changed_values(layer, changed_attribute_values, changed_geometries, ids_deleted))
                 
+                #TODO CLEAN UP AFFECTED FEATURES
+
                 self.handle_altered_features(layer, list(features.values()))
             except Exception as e:
                 self.iface.messageBar().pushMessage("Lagring mislyktes", "" , str(e), level=2, duration=10)
@@ -576,6 +770,9 @@ class NgisOpenApiClient:
             if fid in ids_deleted: continue
 
             changed_feature = lyr.getFeature(fid)
+
+            if not changed_feature.isValid(): continue
+
             lokalid = changed_feature.attribute('lokalId')
             if lyr.geometryType() == QgsWkbTypes.PolygonGeometry or lyr.geometryType() == QgsWkbTypes.LineGeometry:
                 feature_with_lock = self.lock_feature(lyr, changed_feature, 'direct')
@@ -713,17 +910,25 @@ class NgisOpenApiClient:
                 layers = QgsProject.instance().mapLayers()
 
                 for reference in references:
+                    # Ignore direction when searching for references
+                    if reference[0] == '-':
+                        reference = reference[1:]
+
                     done = False
                     if reference not in self.affected_features:
                         raise Exception("Not yet implemented, uncertain if this is a use case")
-                    
+
+
                     affected_feature = self.affected_features[reference]
+
+                    features[reference] = affected_feature
 
                     for layer_id, layer in layers.items():
                         if done:
                             break
                         else:
-                            if layer.editBuffer() is not None:
+                            if isinstance(layer, QgsVectorLayer) and layer.editBuffer() is not None:
+                                # Informasjon fra bufferlag har prioritet over felleskomponenten, kan ha skjedd ting i mellomtiden
                                 print("ok")
                                 addedFeaturesInThisLayer = list(layer.editBuffer().addedFeatures().values())
                                 for added_feature in addedFeaturesInThisLayer:
@@ -752,9 +957,11 @@ class NgisOpenApiClient:
 
 
             else:
-                lokalid = str(uuid.uuid4())
-                new_feature["properties"]["identifikasjon"]["lokalId"] = lokalid
-                lyr.updateFeature(feature)
+
+
+                #lokalid = str(uuid.uuid4())
+                #new_feature["properties"]["identifikasjon"]["lokalId"] = lokalid
+                #lyr.updateFeature(feature)
                 new_feature['update'] = {"action":"Create"}
                 features[lokalid] = new_feature
             
@@ -772,15 +979,30 @@ class NgisOpenApiClient:
                 self.iface.messageBar().pushMessage("Success", "Ingen endringer ble sjekket inn i NGIS-OpenAPI", level=3, duration=3)
                 return
 
-            json_dict = {"type": "FeatureCollection", "features" : None, "crs" : None}
+            json_dict = {"type": "FeatureCollection", "features" : [], "crs" : None}
             
             crs = lyr.crs().authid()
             crs_epsg = authid_to_code(crs)
             json_dict.update(create_crs_entry(crs))
+            
+            lokalids = set()
+            for feature in features: 
+                lokalid = feature.get("properties", {}).get("identifikasjon", {}).get("lokalId", None)
+                lokalids.add(lokalid)
+
+            for affected_lokalid, affected_feature in self.affected_features.items():
+                if not affected_lokalid in lokalids:
+                    features.append(affected_feature)
+
             json_dict['features'] = features
+
 
             datasetid = self.dataset_dictionary[lyr.id()]
             return_data = self.client.updateDatasetFeature(datasetid, crs_epsg, json_dict)
+
+            # TODO Smarter filtering of which features was necessary, and which affected_features has not yet been commited
+            self.affected_features = {}
+
             self.iface.messageBar().pushMessage("Success", f"{lyr.name()}: Endringene er lagret", str(return_data), level=3, duration=10)
             
         except Exception as e:
@@ -804,6 +1026,7 @@ class NgisOpenApiClient:
             self.dlg.logInButton.clicked.connect(self.handle_login)
             self.dlg.logOutButton.clicked.connect(self.handle_logout)
             self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
-            
+            self.dlg.polyFromLineButton.clicked.connect(self.handle_make_polygon_from_line)
+
         # show the dialog
         self.dlg.show()

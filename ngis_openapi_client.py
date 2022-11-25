@@ -114,6 +114,7 @@ class NgisOpenApiClient:
         self.layer_dictionary = {}
         self.affected_features = {}
         self.affected_features_to_layer = {}
+        self.layer_feature_history_dictionary = {}
         self.client = None
         self.xsd = []
     # noinspection PyMethodMayBeStatic
@@ -318,7 +319,7 @@ class NgisOpenApiClient:
 
         for lokalid, feature in added_polygons.items():
             options = list(self.feature_type_dictionary.values())
-            self.prompt_new_feature(feature, options)
+            self.prompt_new_feature(feature, "Flate", "Spesifisér type flate", options)
 
         print(len(lineLayer))
 
@@ -334,7 +335,12 @@ class NgisOpenApiClient:
         # Group name equals selected dataset name
         group_kodelister = self.create_group("Kodelister")
         group_kodelister.setExpanded(0)
+
+        group_komplekse = self.create_group("Komplekse")
+        group_komplekse.setExpanded(0)
+
         group = self.create_group(selected_name)
+        
         
 
         # Get metadata and features from NgisOpenAPI
@@ -366,10 +372,17 @@ class NgisOpenApiClient:
         
         features_from_api['features'] = None
 
-
+        complex_multiple = {}
 
         for typeNavn, typeVerdi in self.xsd.items():
             for attrNavn, attrVerdi in typeVerdi.items():
+                
+                #todo flytt denne til xsd-parser? fjern atributter som ikke skal være flatet ut
+                if (attrVerdi.parentAttribute is not None and attrVerdi.parentAttribute.maxOccurs > 1):
+                    entry = complex_multiple.get(attrVerdi.parentAttribute.name, {})
+                    entry[attrVerdi.name] = attrVerdi
+                    complex_multiple[attrVerdi.parentAttribute.name] = entry
+
                 if (attrVerdi.type == 'enum' and attrVerdi.maxOccurs > 1):
                     vector_names = [l.name() for l in QgsProject().instance().mapLayers().values() if isinstance(l, QgsVectorLayer)]
                     if attrNavn in vector_names: continue
@@ -391,7 +404,23 @@ class NgisOpenApiClient:
                     lyr.commitChanges()
                     QgsProject.instance().addMapLayer(lyr, False)
                     group_kodelister.addLayer(lyr)
+        
         layers = {}                    
+
+        for parentName, childs in complex_multiple.items():
+            lyr = QgsVectorLayer('NoGeometry?crs=EPSG:4326', f'{parentName}', "memory")
+            lyr.setCustomProperty("skipMemoryLayersCheck", 1) #13012022
+            lyr.startEditing()
+
+            #Legger til ekstra felter slik at dette kan kobles inn i attributtvelgern
+            lyr.addAttribute(QgsField("lokalid", QVariant.String))
+            lyr.addAttribute(QgsField("key", QVariant.String))
+            xsd_to_fields(lyr, childs)
+
+            lyr.commitChanges()
+            QgsProject.instance().addMapLayer(lyr, False)
+
+            group_komplekse.addLayer(lyr)
 
         for feature_type, features_list in features_by_type.items():
             # Create a new GeoJSON object containing a single featuretype
@@ -413,6 +442,11 @@ class NgisOpenApiClient:
                     featuretype = feature.attribute('featuretype')
                     geom_type = feature.geometry()
                     geom_type = QgsWkbTypes.displayString(int(geom_type.wkbType()))
+                    
+                    # Mismatch bug between 25D and Z in QGIS when creating features
+                    if geom_type[-3:] == '25D':
+                        geom_type = f'{geom_type[:-3]}Z'
+                    
                     if geom_type not in geometry_dict:
                         geometry_dict[geom_type] = {}
                     if featuretype not in geometry_dict[geom_type]:
@@ -428,8 +462,8 @@ class NgisOpenApiClient:
                     
                     lyr.startEditing()
                     
-                    add_fields_to_layer(lyr, fields, feature_type, self.xsd)
-                    print(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}')   
+                    add_fields_to_layer(lyr, feature_type, self.xsd)
+                    #print(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}')   
                     lyr.commitChanges()
                     l_d = lyr.dataProvider()
                     lyrfields = lyr.fields()
@@ -454,23 +488,33 @@ class NgisOpenApiClient:
                                 newDict[oldfield.name()] = f'{{{vals}}}'
                                 
                             else:
-                                try:
-                                    obj = json.loads(attribute)
+                                obj = {}
+                                if type(attribute) is dict:
+                                    obj = attribute
                                     for key, value in obj.items():
                                         newDict[key] = value
-                                except:
-                                    newDict[oldfield.name()] = feature.attributes()[idx]
+                                else:
+                                    try:
+                                        obj = json.loads(attribute)
+                                        for key, value in obj.items():
+                                            newDict[key] = value
+                                    except:
+                                        newDict[oldfield.name()] = feature.attributes()[idx]
+                                
+                                
+                                        
 
                         fieldOrder = {}
                         fet.initAttributes(len(lyrfields))
                         for fieldName in newDict.keys():
                             newIdx = lyrfields.indexFromName(fieldName)
                             fieldOrder[fieldName] = newIdx
-                            print(f'{newIdx} - {newDict[fieldName]}')
+                            #print(f'{newIdx} - {newDict[fieldName]}')
                             try:
                                 fet.setAttribute(newIdx, newDict[fieldName])
                             except Exception as e:
-                                print(e)
+                                #print(e)
+                                pass
                         l_d.addFeature(fet)
 
                     
@@ -480,17 +524,14 @@ class NgisOpenApiClient:
                     lyr.commitChanges()
                     layers[lyr.name()] = lyr
                     
-                   
-                    #lyr.committedFeaturesAdded.connect(self.handleCommitedAddedFeatures)
-                    #lyr.committedFeaturesRemoved.connect(self.handleCommittedFeaturesRemoved)
-                    #lyr.featuresDeleted.connect(self.handleDeletedFeatures)
-                    #lyr.committedGeometriesChanges(self.ee)
                     
                     self.layer_dictionary[lyr.id()] = lyr
+                    self.layer_feature_history_dictionary[lyr.id()] = {}
 
                     lyr.beforeCommitChanges.connect(self.handle_before_commitchanges)
                     lyr.featureAdded.connect(self.handle_feature_added)
                     #Legge inn disse i en array, eller loope igjennom alle lag etter uncommited features?
+                    print(f"{lyr.id()} connects handle_geometry_change")
                     lyr.geometryChanged.connect(self.handle_geometry_change)
                     lyr.selectionChanged.connect(self.handle_selection_change)
 
@@ -539,6 +580,7 @@ class NgisOpenApiClient:
         layer = None
 
         for layerName, layerObject in QgsProject.instance().mapLayers().items():
+            if not isinstance(layerObject, QgsVectorLayer): continue
             if layerObject.getFeature(fid).isValid():
                 added_feature = layerObject.getFeature(fid)
                 layer = layerObject
@@ -579,12 +621,12 @@ class NgisOpenApiClient:
 
             options = list(self.feature_type_dictionary.values())
 
-            self.prompt_new_feature(avgrensing_feature, options)
+            self.prompt_new_feature(avgrensing_feature, "Avgrensingslinje", "Spesifisér type avgrensingslinje", options)
             
 
-    def prompt_new_feature(self, feature_geojson, prompt_options):
+    def prompt_new_feature(self, feature_geojson, prompt_title, prompt_text, prompt_options):
         
-        dialog = NgisInputTypeDialog(prompt_options)
+        dialog = NgisInputTypeDialog(prompt_title, prompt_text, prompt_options)
 
         if dialog.ok:
             layerName = next(key for key, value in self.feature_type_dictionary.items() if value == dialog.item)
@@ -610,10 +652,11 @@ class NgisOpenApiClient:
 
         tbl = self.iface.openFeatureForm(lyr, feat, False)
         if tbl == True:
-            dataProvider.addFeature(feat)
-            lyr.endEditCommand()
+            #Dette ønsker vi kanskje for linje, da man skal slippe å lagre
+            #dataProvider.addFeature(feat)
+            #lyr.endEditCommand()
         
-        lyr.addFeature(feat)
+            lyr.addFeature(feat)
         return lyr, feat
 
     def find_ngis_feature_in_canvas(self, ngis_feature):
@@ -628,9 +671,10 @@ class NgisOpenApiClient:
                         print(f"fant {lokalid} in {matchLayer.id()}, {layerFeature.geometry().type()}")
                         return matchLayer, layerFeature
 
+
     def handle_geometry_change(self, fid, geometry):
         print("geometryChanged")
-        
+
         layers = QgsProject.instance().mapLayers()
 
         for layer_id, layer in layers.items():
@@ -640,10 +684,24 @@ class NgisOpenApiClient:
             if editBuffer is not None:
                 changed_geometries = editBuffer.changedGeometries()
                 if fid in changed_geometries and geometry.asJson() == changed_geometries[fid].asJson():
+                    
+                    
+                    
                     #Feature identified in layer, TODO must be a better way to do this
                     new_feature = layer.getFeature(fid)
                     old_feature = list(layer.dataProvider().getFeatures( QgsFeatureRequest( fid ) ))[0]
-                    ngis_openapi_result = self.lock_feature(layer, old_feature, 'direct')
+                    old_feature = self.layer_feature_history_dictionary[layer.id()].get(fid, old_feature)
+
+                    
+
+                    # If already in affected features, and no geometry change, return (QGIS bug, vertex tool causes three signals)
+                    #lokalid = new_feature["lokalid"]
+                    #affected_feature = self.affected_features.get(lokalid, None)
+                    #if affected_feature is not None and geometry.asJson() == affected_feature.get("geometry"):
+                    #    return
+
+
+                    ngis_openapi_result = self.lock_feature(layer, old_feature, 'all')
                     referenced_features = []
                     feature_from_ngis_openapi = ngis_openapi_result.get("features", [])
                     for feature in feature_from_ngis_openapi:
@@ -663,8 +721,8 @@ class NgisOpenApiClient:
                         'newFeature': self.feature_to_geojson(layer, new_feature),
                         'affectedFeatures' : referenced_features
                         }
-                    
-                    x = requests.post(url, json = body)
+
+                    x = requests.post(url, json = body, verify=False)
             
                     topology_response = json.loads(x.text)
 
@@ -699,9 +757,11 @@ class NgisOpenApiClient:
                                         geom = QgsGeometry.fromWkt(geom.ExportToWkt())
                                         layerFeature.setGeometry(geom)
                                         matchLayer.updateFeature(layerFeature)
+                                        self.layer_feature_history_dictionary[layerId][layerFeature.id()] = layerFeature
                                         matchLayer.geometryChanged.connect(self.handle_geometry_change)
+                                        print(f"Found feature (fid: {layerFeature.id()}) in layerId {layerId} to replace geometry")
                                         break
-                                        print("Found feature to replace geometry")
+                                        
 
                     
                     print(f"layer: {layer.id()}, fid: {fid}")
@@ -778,7 +838,7 @@ class NgisOpenApiClient:
 
             lokalid = changed_feature.attribute('lokalId')
             if lyr.geometryType() == QgsWkbTypes.PolygonGeometry or lyr.geometryType() == QgsWkbTypes.LineGeometry:
-                feature_with_lock = self.lock_feature(lyr, changed_feature, 'direct')
+                feature_with_lock = self.lock_feature(lyr, changed_feature, 'all')
             else:
                 feature_with_lock = self.lock_feature(lyr, changed_feature)
             
@@ -834,10 +894,16 @@ class NgisOpenApiClient:
         features = {}
         for deleted_feature in deleted_features:
             
-            feature_with_lock = self.lock_feature(lyr, deleted_feature)
-            feature_with_lock['features'][0]['update'] = {'action': 'Erase'}
+            feature_with_lock = self.lock_feature(lyr, deleted_feature, 'all')
+
+            features_from_ngis = feature_with_lock.get('features', [])
+
+            for ngis_feature in features_from_ngis:
+                lokalid = ngis_feature.get("properties", {}).get("identifikasjon", {}).get("lokalId", None)
+                if deleted_feature['lokalid'] == lokalid:
+                    ngis_feature['update'] = {'action': 'Erase'}
             
-            features.update({ feature['properties']['identifikasjon']['lokalId'] : feature for feature in feature_with_lock["features"] })
+            features.update({ feature['properties']['identifikasjon']['lokalId'] : feature for feature in features_from_ngis })
         
         return features
 
@@ -872,16 +938,28 @@ class NgisOpenApiClient:
                                 value = val.values[position]["value"]
                             except Exception:
                                 continue
-
-                    if len(val.xmlPath) > 0:
+                    parent = val.parentAttribute               
+                    if parent is not None:
                         # Only one complex-element (maton, 01.11.2022)
                         # if (val.xmlPath[0] == 'identifikasjon' or val.xmlPath[0] == 'kvalitet'):
-                        if val.xmlPath[0] in properties:
-                            properties[val.xmlPath[0]][ele] = value
+                        
+                        if parent.parentAttribute is not None:
+                            raise Exception("Nested schema not yet implemented")
+
+                        parentName = parent.name
+                        
+                        if parent.maxOccurs <= 1:
+                        
+                            if parent.name in properties:
+                                properties[parent.name][ele] = value
+                            else:
+                                properties[parent.name] = {
+                                    ele : value
+                                }
+                        #kompleks, multippel egenskap
                         else:
-                            properties[val.xmlPath[0]] = {
-                                ele : value
-                            }
+                            raise Exception("Komplekse multiple egenskaper not yet implemented")
+
                         # Assuming multiple complex elements 
                         #else:
                         #    if val.xmlPath[0] in properties:
@@ -902,7 +980,7 @@ class NgisOpenApiClient:
         #TODO Husk å committe features som er referert i andre lag så ikke lagre-knappen er mulig å trykke på for allerede innsjekkede features
         
         features = {}
-        print(self.xsd)
+        #print(self.xsd)
         for fid, feature in added_features.items():
             
             new_feature = self.feature_to_geojson(lyr, feature)

@@ -53,24 +53,13 @@ def try_parse_json(myjson):
     except Exception:
         return myjson
 
-def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
 
-    xsd_def = xsd[feature_type]
-    lyr.addAttribute(QgsField("featuretype", QVariant.String))
-
-    for field_idx, fieldName in enumerate(xsd_def, 1):
+def xsd_to_fields(lyr, xsd_def):
+    for field_idx, fieldName in enumerate(xsd_def):
         field_def : Attribute = xsd_def[fieldName]
         field_type = field_def.type
 
         field = None
-
-        if field_def.minOccurs == 1:
-            constaints = QgsFieldConstraints()
-            constaints.setConstraint(1)
-            featuretype_idx = fields.indexOf(fieldName)
-            if featuretype_idx > -1:
-                field = fields.field(featuretype_idx)
-                field.setConstraints(constaints)
 
         if field_type == "date":
             field = QgsField(fieldName, QVariant.Date, comment = field_def.documentation)
@@ -101,9 +90,6 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
             field_to_datetime(lyr, field_idx)
         if field_type == "string":
             lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("''"))
-            #default_text = field_def['default'] if 'default' in field_def else None
-            #if default_text:
-            #    field_to_default_text(lyr, field_idx, field_type, default_text)
         if field_type == "enum":
             enum = field_def.values
             if enum:
@@ -111,8 +97,8 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
                     field_to_valuerelation(lyr, field_idx, field_def.minOccurs == 0)
                 else:
                     field_to_valuemap(lyr, field_idx, enum)
-        read_only = field_def.readOnly
         
+        # Some default values
         if fieldName == "lokalId":
             lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'<autogenerert>'"))
             form_config = lyr.editFormConfig()
@@ -128,8 +114,16 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
             form_config = lyr.editFormConfig()
             form_config.setReadOnly(field_idx, True)
             lyr.setEditFormConfig(form_config)
+
+def add_fields_to_layer(lyr, feature_type, xsd):
+
+    xsd_def = xsd[feature_type]
     
-    featuretype_idx = fields.indexOf("featuretype")
+    xsd_to_fields(lyr, xsd_def)
+    
+    # Featuretype should not be writable
+    lyr.addAttribute(QgsField("featuretype", QVariant.String))
+    featuretype_idx = lyr.fields().indexOf("featuretype")
     if featuretype_idx >= 0:
         lyr.setDefaultValueDefinition(featuretype_idx, QgsDefaultValue(f'\'{feature_type}\''))
         form_config = lyr.editFormConfig()

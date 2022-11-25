@@ -36,11 +36,11 @@ class Attribute:
     minOccurs = None
     maxOccurs = None
     values = None
-    xmlPath = None
+    parentAttribute = None
     readOnly = False
     documentation = None
 
-    def __init__(self, name, type, minOccurs, maxOccurs, values, xmlPath, documentation = None):
+    def __init__(self, name, type, minOccurs, maxOccurs, values, parentAttribute, documentation = None):
         self.name = name
         self.type = type
 
@@ -50,10 +50,10 @@ class Attribute:
             self.maxOccurs = int(maxOccurs)
         self.minOccurs = int(minOccurs)
         self.values = values
-        self.xmlPath = xmlPath
+        self.parentAttribute = parentAttribute
         self.documentation = documentation
 
-def add_sekvens(sekvens, schemaPath, session):
+def add_sekvens(sekvens, parentAttribute, session):
     underelementer = sekvens.findall(f"{defaultNamespace}element")
     result = []
     for element in underelementer:
@@ -65,7 +65,7 @@ def add_sekvens(sekvens, schemaPath, session):
                 print(f"Referer til {element} ({elementTypeName})")
                 ele = XsdElement(refTypeName,elementTypeNamespace, elementTypeName)
                 # Add extra attribute for list of complex elements here? (maton, 31.10.2022)
-                result.extend(utled_egenskaper(ele, schemaPath, True, session))
+                result.extend(utled_egenskaper(ele, parentAttribute, True, session))
             else:
                 elementName = element.attrib.get('name', None)
                 elementType = element.attrib.get('type', None)
@@ -89,7 +89,7 @@ def add_sekvens(sekvens, schemaPath, session):
                 ele.minOccurs = minOccurs
                 ele.maxOccurs = maxOccurs
 
-                result.extend(utled_egenskaper(ele, schemaPath, False, session))
+                result.extend(utled_egenskaper(ele, parentAttribute, False, session))
         except Exception as e:
             print(f'Exception here: {elementType}')
     return result
@@ -109,7 +109,7 @@ def get_documentation_from_annotation(element):
                 codeSpace = defaultCodeSpace.text
     return doc, codeSpace
 
-def handle_restriction(entryName, element, schemaPath):
+def handle_restriction(entryName, element, parentAttribute):
     base = element.attrib['base']
     enumerations = element.findall(f"{defaultNamespace}enumeration")
     pattern = element.find(f"{defaultNamespace}pattern")
@@ -127,17 +127,17 @@ def handle_restriction(entryName, element, schemaPath):
             doc, _ = get_documentation_from_annotation(enum)
             enums.append({"type": base, "value": val, "desc": doc})
         print(f"fant {entryName} (enum)")
-        return [Attribute(entryName, "enum", 1, 1, enums, schemaPath, restriction_doc)]
+        return [Attribute(entryName, "enum", 1, 1, enums, parentAttribute, restriction_doc)]
     elif pattern is not None:
         # TODO
         return []
     else:
         raise Exception("Not implemented")
 
-def handle_kodeliste(xsdElement: XsdElement, schemaPath, session):
+def handle_kodeliste(xsdElement: XsdElement, parentAttribute, session):
 
     if xsdElement.defaultCodeSpace is None:
-        return [Attribute(xsdElement.name, "string", xsdElement.minOccurs, xsdElement.maxOccurs, None, schemaPath, xsdElement.documentation)]
+        return [Attribute(xsdElement.name, "string", xsdElement.minOccurs, xsdElement.maxOccurs, None, parentAttribute, xsdElement.documentation)]
 
     response = session.get(f"{xsdElement.defaultCodeSpace}.json", verify=False)
     json = response.json()
@@ -150,19 +150,19 @@ def handle_kodeliste(xsdElement: XsdElement, schemaPath, session):
             doc = enum['description']
             enums.append({"type": base, "value": val, "desc": doc})
 
-    return [Attribute(xsdElement.name, "enum", xsdElement.minOccurs, xsdElement.maxOccurs, enums, schemaPath, xsdElement.documentation)]
+    return [Attribute(xsdElement.name, "enum", xsdElement.minOccurs, xsdElement.maxOccurs, enums, parentAttribute, xsdElement.documentation)]
 
 
-def utled_egenskaper(xsdElement: XsdElement, schemaPath, ref, session):
+def utled_egenskaper(xsdElement: XsdElement, parentAttribute, ref, session):
 
     typeDict = types.get(xsdElement.typeName, None)
     if xsdElement.typeNamespace == 'gml':
         if xsdElement.typeName == 'CodeType': 
-            return handle_kodeliste(xsdElement, schemaPath, session)
+            return handle_kodeliste(xsdElement, parentAttribute, session)
         return []
     if not xsdElement.typeNamespace:
         print(f"fant {xsdElement.name} ({xsdElement.typeName})")
-        return [Attribute(xsdElement.name, xsdElement.typeName, xsdElement.minOccurs, xsdElement.maxOccurs, None, schemaPath, xsdElement.documentation)]
+        return [Attribute(xsdElement.name, xsdElement.typeName, xsdElement.minOccurs, xsdElement.maxOccurs, None, parentAttribute, xsdElement.documentation)]
     
     simple = typeDict['simple']
     entry = typeDict['entry']
@@ -182,11 +182,11 @@ def utled_egenskaper(xsdElement: XsdElement, schemaPath, ref, session):
                 ele.minOccurs = xsdElement.minOccurs
                 ele.maxOccurs = xsdElement.maxOccurs
                 
-                res = utled_egenskaper(ele, schemaPath, False, session)
+                res = utled_egenskaper(ele, parentAttribute, False, session)
                 result.extend(res)
             return result
         elif restriction is not None:
-            return handle_restriction(xsdElement.name, restriction, schemaPath)
+            return handle_restriction(xsdElement.name, restriction, parentAttribute)
         else:
             raise Exception("Not implemented")
     else:
@@ -202,16 +202,16 @@ def utled_egenskaper(xsdElement: XsdElement, schemaPath, ref, session):
                 print(f"Extension: Utleder egenskaper til {extensionTypeName}")
                 result = []
                 ele = XsdElement(entryName, extensionTypeNamespace, extensionTypeName)
-                result.extend(utled_egenskaper(ele, schemaPath, False, session))
+                result.extend(utled_egenskaper(ele, parentAttribute, False, session))
                 sekvens = child.find(f"{defaultNamespace}sequence")
                 print(f"Extension: Utleder egenskaper i sekvensen til {entryName}")
-                result.extend(add_sekvens(sekvens, schemaPath, session))
+                result.extend(add_sekvens(sekvens, parentAttribute, session))
                 return result
         elif sequence is not None:
             if not ref:
-                schemaPath = [xsdElement.name]
+                parentAttribute = Attribute(xsdElement.name, "complexType", xsdElement.minOccurs, xsdElement.maxOccurs, None, parentAttribute, xsdElement.documentation)
             print("sequence")
-            return add_sekvens(sequence, schemaPath, session)
+            return add_sekvens(sequence, parentAttribute, session)
         else:
             raise Exception("Not implemented")
 
@@ -263,18 +263,19 @@ def parseXSD(xmlstring):
     
     tm = QgsApplication.taskManager()
 
+    #PROD
     for element in elements:
         print(f"EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE {element}")
         tm.addTask(RandomIntegerSumTask(f"TASK_{element}",result_dict, elements, element))
-        #for egenskap in egenskaper:
-            #result[element][egenskap.name] = egenskap
-
-
-    #for element in elements:
-    #    egenskaper = testfunction(element)
-    #    for egenskap in egenskaper:
-    #        result[element][egenskap.name] = egenskap
     time.sleep(5)
+    
+    #DEBUG
+    #for element in elements:
+    #    egenskaper = testfunction(elements, element)
+    #    for egenskap in egenskaper:
+    #        result_dict[element][egenskap.name] = egenskap
+    
+    
     
     return result_dict
 
@@ -293,9 +294,7 @@ def completed():
     
     #result_counter += 1
 
-def testfunction(task, element):
-
-    print(f"Started task {task.description()}")
+def testfunction(elements, element):
 
     namespace, typeName = elements[element].split(':', 1)
 
@@ -303,10 +302,8 @@ def testfunction(task, element):
 
     session = requests.Session()
 
-    egenskaper = utled_egenskaper(ele, [], False, session)
+    return utled_egenskaper(ele, None, False, session)
 
-    print(f"Ferdig med task {task.description()}")
-    return {'element': element, 'egenskaper': egenskaper}
 
 
 class RandomIntegerSumTask(QgsTask):
@@ -335,7 +332,7 @@ class RandomIntegerSumTask(QgsTask):
 
         session = requests.Session()
 
-        self.egenskaper = utled_egenskaper(ele, [], False, session)
+        self.egenskaper = utled_egenskaper(ele, None, False, session)
 
         print(f"Feeeerdig med task {self.description}")
     

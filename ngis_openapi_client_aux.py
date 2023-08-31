@@ -28,7 +28,32 @@ from qgis.core import (
     QgsField
 )
 from PyQt5.QtCore import QVariant, QSettings, QTranslator, QCoreApplication, QTextCodec, QDate
-from ngis_openapi_client_xsd_parser import Attribute
+
+from xsd_parser.models.xsd_parser_models import (Attribute, Avgrensing, Geometry)
+
+#Attribute = __import__("SFKB-QGISAPI-klient.ngis_openapi_client_xsd_parser").ngis_openapi_client_xsd_parser.Attribute
+#Avgrensing = __import__("SFKB-QGISAPI-klient.ngis_openapi_client_xsd_parser").ngis_openapi_client_xsd_parser.Avgrensing
+#Geometry = __import__("SFKB-QGISAPI-klient.ngis_openapi_client_xsd_parser").ngis_openapi_client_xsd_parser.Geometry
+
+
+def utledAvgrensinger(xsd):
+    
+    avgrenser = {}
+    avgrensesAv = {}
+
+    for subkey, sublist in xsd.items():
+        for k, v in sublist.items():
+            if isinstance(v, Avgrensing):
+                if v.avgrensesAv not in avgrenser:
+                    avgrenser[v.avgrensesAv] = []
+                avgrenser[v.avgrensesAv].append(subkey)
+
+                if subkey not in avgrensesAv:
+                    avgrensesAv[subkey] = []
+                avgrensesAv[subkey].append(v.avgrensesAv)
+    
+    return avgrenser, avgrensesAv
+
 
 def create_crs_entry(epsg):
     return {
@@ -53,10 +78,17 @@ def try_parse_json(myjson):
     except Exception:
         return myjson
 
+def of_type(iterable, target_type):
+        return [i for i in iterable if isinstance(i, target_type)]
 
 def xsd_to_fields(lyr, xsd_def):
-    for field_idx, fieldName in enumerate(xsd_def):
-        field_def : Attribute = xsd_def[fieldName]
+    
+
+    for fieldName, field_def in xsd_def.items():
+        
+        #todo andreas (handle geometry og avgrensingslinjer, ignoreR?)
+        if not isinstance(xsd_def[fieldName], Attribute): continue
+
         field_type = field_def.type
 
         field = None
@@ -83,6 +115,7 @@ def xsd_to_fields(lyr, xsd_def):
             field.setConstraints(constaints)
 
         lyr.addAttribute(field)
+        field_idx = lyr.fields().indexFromName(fieldName)
 
         if field_type == "date":
             field_to_date(lyr, field_idx)
@@ -100,7 +133,7 @@ def xsd_to_fields(lyr, xsd_def):
         
         # Some default values
         if fieldName == "lokalId":
-            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'<autogenerert>'"))
+            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("replace(replace(uuid(), '{', ''), '}', '')"))
             form_config = lyr.editFormConfig()
             form_config.setReadOnly(field_idx, True)
             lyr.setEditFormConfig(form_config)

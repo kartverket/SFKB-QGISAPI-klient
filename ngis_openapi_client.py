@@ -56,9 +56,12 @@ from qgis.core import (
     QgsGeometry,
     QgsVectorLayerUtils,
     QgsPalLayerSettings, 
-    QgsVectorLayerSimpleLabeling
+    QgsVectorLayerSimpleLabeling,
+    QgsSpatialIndex,
+    QgsPointXY
 )
 
+import math
 import pickle
 import json
 import uuid
@@ -135,6 +138,7 @@ class NgisOpenApiClient:
         self.layer_geometrychange_handler = {}
         self.undostack_index_changed_handler = {}
         self.layer_feature_added_handler = {}
+        self.layer_features_deleted_handler = {}
         self.after_commit_changes_handler = {}
         self.before_commitchanges_handler = {}
         
@@ -561,7 +565,7 @@ class NgisOpenApiClient:
             feature_type = feature['properties']['featuretype']
             features_by_type.setdefault(feature_type, []).append(feature)
 
-        features_by_type = {key: features_by_type[key] for key in ['Kaiområde', 'KaiområdeGrense'] if key in features_by_type} #Andreas
+        #features_by_type = {key: features_by_type[key] for key in ['Kaiområde', 'KaiområdeGrense'] if key in features_by_type} #Andreas
 
         for feature_type, features_list in features_by_type.items():
             # Create a new GeoJSON object containing a single featuretype
@@ -712,6 +716,10 @@ class NgisOpenApiClient:
                 feature_added_handler = lambda fid, lyr=lyr: self.handle_feature_added(lyr, fid)
                 self.layer_feature_added_handler[lyr.id()] = feature_added_handler
                 lyr.featureAdded.connect(self.layer_feature_added_handler[lyr.id()])
+
+                features_deleted_handler = lambda fids, lyr=lyr: self.handle_feature_deleted(lyr, fids)
+                self.layer_features_deleted_handler[lyr.id()] = features_deleted_handler
+                lyr.featuresDeleted.connect(self.layer_features_deleted_handler[lyr.id()])
                 
                 # lyr.committedFeaturesAdded.connect(self.handle_committed_features_added_signal)
                 
@@ -749,6 +757,9 @@ class NgisOpenApiClient:
 
         for layername in sorted(list(layers.keys())):
             group.addLayer(layers[layername])
+
+        for feature in features_from_api['features']:
+            self.oppdater_affected_features_topology(feature)
 
 
     def get_sld(self):
@@ -851,7 +862,17 @@ class NgisOpenApiClient:
 
             print(f'Committed feature added: {layer_id} : {feature.id()}')
             self.old_geom_dict[(layer.id(), feature['lokalId'])] = feature.geometry()
-        
+    
+    def handle_feature_deleted(self, lyr, fids):
+        # features_deleted = lyr.dataProvider().getFeatures(QgsFeatureRequest().setFilterFids(fids))
+        # for feature in features_deleted:
+        #     affected = self.affected_features_topology.setdefault(feature['lokalId'], {}).keys()
+        #     for aff in list(affected):
+        #         self.affected_features_topology[aff].pop(feature['lokalId'], None)
+        #     self.affected_features_topology.pop(feature['lokalId'], None)
+        #     self.affected_features.pop(feature['lokalId'], None)
+        pass # redo of delete does not trigger featureAdded..
+    
     def handle_feature_added(self, layer, fid):
 
 
@@ -1143,8 +1164,12 @@ class NgisOpenApiClient:
             if stack_length > 0:
                 self.abort_geometry_change = True
                 return
-
-
+        
+        last_command = layer.undoStack().command(layer.undoStack().index()-1)
+        if layer.geometryType() == QgsWkbTypes.PolygonGeometry and last_command != None and last_command.text() == "New feature":
+            self.abort_geometry_change = True
+            return
+        
         #############
         # CHANGELOG #
         #############
@@ -1220,6 +1245,29 @@ class NgisOpenApiClient:
                     canvas_lyr, feature_in_canvas = self.find_ngis_feature_in_canvas(feature)
                     old_feature_json = self.feature_to_geojson(canvas_lyr, feature_in_canvas)
                     new_feature_json = feature
+
+                    # new_feature_geometry = ogr.CreateGeometryFromJson(json.dumps(feature['geometry']))
+                    # new_feature_geometry = QgsGeometry.fromWkt(new_feature_geometry.ExportToWkt())
+
+                    # index = QgsSpatialIndex()
+                    # for feature in canvas_lyr.getFeatures():
+                    #     index.insertFeature(feature)
+
+                    # for idx, new_vertex in enumerate(new_feature_geometry.vertices()):
+                    #     old_vertex = feature_in_canvas.geometry().vertexAt(idx)
+                    #     old_point = QgsPointXY(old_vertex.x(), old_vertex.y())
+                    #     old_point_geometry = QgsGeometry.fromPointXY(old_point)
+                    #     new_point = QgsPointXY(new_vertex.x(), new_vertex.y())
+                    #     new_point_geometry = QgsGeometry.fromPointXY(new_point)
+
+                    #     if not new_point_geometry.isGeosEqual(old_point_geometry):
+                    #         fids = index.intersects(old_point_geometry.boundingBox())
+                    #         for fid in fids:
+                    #             ref_feature = canvas_lyr.getFeature(fid)
+                    #             for topology_feature in self.affected_features_topology[ref_feature['lokalId']].keys():
+                    #                 self.add_relevant_referenced_features(referenced_features, topology_feature)
+                                    
+
                     # Nå har vi funnet én linje som ble påvirket av dette. Da kjører vi prosessen videre som om brukeren redigerte på linja
                     if feature_lokalid not in self.not_commited_features_in_this_session:
                         ngis_openapi_result = self.get_feature(canvas_lyr, feature_in_canvas, 'all', True)
@@ -1234,8 +1282,7 @@ class NgisOpenApiClient:
                                     feature_in_canvas_json['properties'][k] = v
 
                                 referenced_features[feature_in_canvas['lokalId']] = feature_in_canvas_json
-                    
-           
+
                     self.add_relevant_referenced_features(referenced_features, lokalid)
 
                     url = 'https://ngis-felleskomponent-test.azurewebsites.net/editLine'
@@ -1736,6 +1783,11 @@ class NgisOpenApiClient:
         
         reference_types = self.affected_features_topology.get(lokalid, {})
         
+        if reference_types[lokalid]['lyr'].geometryType() == QgsWkbTypes.PolygonGeometry:
+            additional_features = [k for k,v in reference_types.items() if v['lyr'].geometryType() == QgsWkbTypes.LineGeometry]
+            for additional_feature in additional_features:
+                reference_types.update(self.affected_features_topology.get(additional_feature, {}))
+
         for fid, feature in features.items():
             aff_feat = self.affected_features.get(fid, {})
             update = aff_feat.get('update', None)
@@ -1746,6 +1798,9 @@ class NgisOpenApiClient:
 
             layer = ref_info['lyr']
             feature_in_canvas = self.get_feature_by_attribute(layer, 'lokalId', ref_lokalid)
+
+            if feature_in_canvas is None: continue #Kan skje dersom man undoer en feature som nylig er opprettet
+
             feature_in_canvas_geojson = self.feature_to_geojson(layer, feature_in_canvas)
             affected_feature = self.affected_features[ref_lokalid].copy()
             

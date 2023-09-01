@@ -143,11 +143,11 @@ def ParseXSD(xmlstring):
 
 
     
-    #DEBUG
-    for element in elements:
+    # #DEBUG
+    # for element in elements:
         
-        subtask = FetchXsdElement(f"TASK_{element}", elements, types, parent_map, element)
-        subtask.run()
+    #     subtask = FetchXsdElement(f"TASK_{element}", elements, types, parent_map, element)
+    #     subtask.run()
         
 
     subtasks = []

@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate, QVariant
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate, QVariant, pyqtSignal
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox, QInputDialog, QUndoStack, QUndoCommand 
 from qgis.utils import plugins, active_plugins
@@ -436,7 +436,6 @@ class NgisOpenApiClient:
     
     def download_and_add_layer(self, metadata_from_api, selected_name, features_from_api=None):
         
-        slds = self.get_sld()
 
         # Group name equals selected dataset name
         group_kodelister = self.create_group("Kodelister")
@@ -445,7 +444,6 @@ class NgisOpenApiClient:
         group_komplekse = self.create_group("Komplekse")
         group_komplekse.setExpanded(0)
 
-        group = self.create_group(selected_name)
 
         try:
             self.avgrenser, self.avgrensesAv = aux.utledAvgrensinger(self.xsd)
@@ -575,206 +573,78 @@ class NgisOpenApiClient:
             feature_type = feature['properties']['featuretype']
             features_by_type.setdefault(feature_type, []).append(feature)
 
-        #features_by_type = {key: features_by_type[key] for key in ['Kaiområde', 'KaiområdeGrense'] if key in features_by_type} #Andreas
-
         codec = QTextCodec.codecForName("UTF-8")
 
+        subtasks = []
+
         for feature_type, features_list in features_by_type.items():
-            # Create a new GeoJSON object containing a single featuretype
+
+            # Your processing logic for a single feature_type comes here
             features_dict = features_from_api.copy()
             features_dict['features'] = features_list
+            subtask = ProcessFeatureTypeTask(f"MAP TASK {feature_type}",feature_type, features_dict, codec, layers, self)
+            #subtask.run()
+            subtasks.append(subtask)
 
-            features_json = json.dumps(features_dict, ensure_ascii=False)
-
-            # Identify fields and features from GeoJSON
-            
-            fields = QgsJsonUtils.stringToFields(features_json, codec)
-            newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
-
-
-            z = -99999
-            # 2. Fyll ut features i featuretypsene
-            if newFeatures:
-                for feature in newFeatures:
-
-                    featuretype = feature.attribute('featuretype')
-                    feature_geom = feature.geometry()
-                    
-                    wkbtype = feature_geom.wkbType()
-                    if not QgsWkbTypes.hasZ(wkbtype):
-                        geom = feature_geom
-                        geom_type = geom.type()
-
-                        if geom_type == QgsWkbTypes.PointGeometry:
-                            geom_point = geom.asPoint()
-                            x, y = geom_point.x(), geom_point.y()
-                            feature.setGeometry(QgsGeometry.fromWkt(f'PointZ({x} {y} {z})'))
-                        
-                        elif geom_type == QgsWkbTypes.LineGeometry:
-                            points_3d = []
-                            for pt in geom.asPolyline():
-                                x, y = pt.x(), pt.y()
-                                points_3d.append(f"{x} {y} {z}")
-                            feature.setGeometry(QgsGeometry.fromWkt(f'LineStringZ({", ".join(points_3d)})'))
-                        
-                        elif geom_type == QgsWkbTypes.PolygonGeometry:
-                            rings_3d = []
-                            for ring in geom.asPolygon():
-                                points_3d = []
-                                for pt in ring:
-                                    x, y = pt.x(), pt.y()
-                                    points_3d.append(f"{x} {y} {z}")
-                                rings_3d.append(f"({', '.join(points_3d)})")
-                            feature.setGeometry(QgsGeometry.fromWkt(f'PolygonZ({", ".join(rings_3d)})'))
-
-
-                    geom_type_wkb_str = QgsWkbTypes.displayString(feature.geometry().wkbType())
-
-                    if featuretype not in geometry_dict[geom_type_wkb_str]:
-                        geometry_dict[geom_type_wkb_str][featuretype] = []
-
-                    geometry_dict[geom_type_wkb_str][featuretype].append(feature)
-
-        for geom_type, feature_types in geometry_dict.items():
-            for feature_type, features in feature_types.items():
-                layername = f'{feature_type}-{geom_type}'
-                lyr = layers.get(layername, None)
-                if lyr == None:
-                    lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', layername, "memory")
-
-                self.feature_type_to_layer[feature_type] = lyr
-
-
-                QgsProject.instance().addMapLayer(lyr, False)
-
-                lyr.startEditing()
-
-                aux.add_fields_to_layer(lyr, feature_type, self.xsd)
-                #print(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}')
-                lyr.commitChanges()
-                l_d = lyr.dataProvider()
-                lyrfields = lyr.fields()
-
-                for feature in features:
-                    fet = QgsFeature()
-                    fet.setGeometry(feature.geometry())
-
-                    attributes = feature.attributes()
-                    newDict = {}
-                    for idx, attribute in enumerate(attributes):
-                        # TODO ANDREAS dette er sikkert ikke riktig. Mangler en del egenskaper
-                        fields = feature.fields()
-
-                        xsd_def = self.xsd[feature_type].get(fields.at(idx).name(), None)
-
-                        if isinstance(xsd_def, Geometry): continue
-                        if isinstance(xsd_def, Avgrensing): continue
-
-                        oldfield = fields.at(idx)
-                        if xsd_def and feature.attributes()[idx] != None and xsd_def.type == "enum" and xsd_def.maxOccurs > 1:
-                            vals = feature.attributes()[idx][3:-1]
-
-                            if isinstance(vals, list) == False:
-                                vals = feature.attributes()[idx][3:-1].split(",")
-
-                            vals = ','.join(vals)
-                            newDict[oldfield.name()] = f'{{{vals}}}'
-
-                        else:
-                            obj = {}
-                            if type(attribute) is dict:
-                                obj = attribute
-                                for key, value in obj.items():
-                                    newDict[key] = value
-                            else:
-                                try:
-                                    obj = json.loads(attribute)
-                                    for key, value in obj.items():
-                                        newDict[key] = value
-                                except:
-                                    newDict[oldfield.name()] = feature.attributes()[idx]
-
-                    fieldOrder = {}
-                    fet.initAttributes(len(lyrfields))
-                    fet.setFields(lyrfields)
-                    for fieldName in newDict.keys():
-                        newIdx = lyrfields.indexFromName(fieldName)
-                        fieldOrder[fieldName] = newIdx
-                        #print(f'{newIdx} - {newDict[fieldName]}')
-                        try:
-                            fet.setAttribute(newIdx, newDict[fieldName])
-                        except Exception as e:
-                            print(f"Exception when setting attribute {fieldName} on {lyr.id()}: {e}")
-                            pass
-                    l_d.addFeature(fet)
-                    self.old_geom_dict[(lyr.id(), fet['lokalId'])] = fet.geometry()
-
-
-                # update the extent of rev_lyr
-                lyr.updateExtents()
-                # save changes made in 'rev_lyr'
-                lyr.commitChanges()
-                layers[lyr.name()] = lyr
-
-
-                self.layer_dictionary[lyr.id()] = lyr
-                self.layers_pending_commit[lyr.id()] = set()
-                #self.layer_feature_history_dictionary[lyr.id()] = {}
-
-                # ------------------------------------
-
-                before_commitchanges_handler = lambda stopEditing, lyr=lyr: self.handle_before_commitchanges(stopEditing, lyr)
-                self.before_commitchanges_handler[lyr.id()] = before_commitchanges_handler
-                lyr.beforeCommitChanges.connect(before_commitchanges_handler)
-                
-                feature_added_handler = lambda fid, lyr=lyr: self.handle_feature_added(lyr, fid)
-                self.layer_feature_added_handler[lyr.id()] = feature_added_handler
-                lyr.featureAdded.connect(self.layer_feature_added_handler[lyr.id()])
-
-                features_deleted_handler = lambda fids, lyr=lyr: self.handle_feature_deleted(lyr, fids)
-                self.layer_features_deleted_handler[lyr.id()] = features_deleted_handler
-                lyr.featuresDeleted.connect(self.layer_features_deleted_handler[lyr.id()])
-                
-                # lyr.committedFeaturesAdded.connect(self.handle_committed_features_added_signal)
-                
-                after_commit_changes_handler = lambda lyr=lyr: self.handle_after_commit_changes(lyr)
-                self.after_commit_changes_handler[lyr.id()] = after_commit_changes_handler
-                lyr.afterCommitChanges.connect(after_commit_changes_handler)
+        task = MainTask('MAP TASK MAIN', subtasks)
+        
+        #parser_handler = lambda geometry_dict, layers=layers, crs_from_api=crs_from_api, features_from_api=features_from_api: self.del3(geometry_dict, layers, crs_from_api, features_from_api)
+        #task.resultSignal.connect(parser_handler)
+        
+        parser_handler = lambda layers=layers: self.add_layers_to_group(layers)
+        task.resultSignal.connect(parser_handler)
+        QgsApplication.taskManager().addTask(task)
     
-                
-                #Legge inn disse i en array, eller loope igjennom alle lag etter uncommited features?
-                
-                geom_change_handler = lambda fid, geom, lyr=lyr: self.handle_geometry_change(lyr, fid, geom)
-                self.layer_geometrychange_handler[lyr.id()] = geom_change_handler
-                lyr.geometryChanged.connect(geom_change_handler)
-                
-                editcommand_ended_handler = lambda lyr=lyr: self.handle_editcommand_ended_handler(lyr)
-                lyr.editCommandEnded.connect(editcommand_ended_handler)
-
-                editcommand_started_handler = lambda text, lyr=lyr: self.handle_editcommand_started_handler(lyr, text)
-                lyr.editCommandStarted.connect(editcommand_started_handler)
-
-                undostack_index_changed_handler = lambda idx, lyr=lyr: self.handle_undostack_index_changed_handler(lyr, idx)
-                self.undostack_index_changed_handler[lyr.id()] = undostack_index_changed_handler
-                lyr.undoStack().indexChanged.connect(undostack_index_changed_handler)
-                
-                # ----------------------
-
-                lyr.selectionChanged.connect(self.handle_selection_change)
-                lyr.attributeValueChanged.connect(lambda fid, idx, val, lyr=lyr: self.handle_attribute_change(lyr, fid, idx, val))
-
-                if feature_type in slds:
-                    lyr.loadSldStyle(slds[feature_type])
-
-                self.dataset_dictionary[lyr.id()] = self.selected_id
-                self.feature_type_dictionary[lyr.id()] = feature_type
+    def add_layers_to_group(self, layers):
+       
+        group = self.create_group(self.selected_name)
 
         for layername in sorted(list(layers.keys())):
-            group.addLayer(layers[layername])
+            lyr = layers[layername]
 
-        for feature in features_from_api['features']:
-            self.oppdater_affected_features_topology(feature)
+            before_commitchanges_handler = lambda stopEditing, lyr=lyr: self.handle_before_commitchanges(stopEditing, lyr)
+            self.before_commitchanges_handler[lyr.id()] = before_commitchanges_handler
+            lyr.beforeCommitChanges.connect(before_commitchanges_handler)
+            
+            feature_added_handler = lambda fid, lyr=lyr: self.handle_feature_added(lyr, fid)
+            self.layer_feature_added_handler[lyr.id()] = feature_added_handler
+            lyr.featureAdded.connect(self.layer_feature_added_handler[lyr.id()])
 
+            features_deleted_handler = lambda fids, lyr=lyr: self.handle_feature_deleted(lyr, fids)
+            self.layer_features_deleted_handler[lyr.id()] = features_deleted_handler
+            lyr.featuresDeleted.connect(self.layer_features_deleted_handler[lyr.id()])
+            
+            # lyr.committedFeaturesAdded.connect(self.handle_committed_features_added_signal)
+            
+            after_commit_changes_handler = lambda lyr=lyr: self.handle_after_commit_changes(lyr)
+            self.after_commit_changes_handler[lyr.id()] = after_commit_changes_handler
+            lyr.afterCommitChanges.connect(after_commit_changes_handler)
+
+            
+            #Legge inn disse i en array, eller loope igjennom alle lag etter uncommited features?
+            
+            geom_change_handler = lambda fid, geom, lyr=lyr: self.handle_geometry_change(lyr, fid, geom)
+            self.layer_geometrychange_handler[lyr.id()] = geom_change_handler
+            lyr.geometryChanged.connect(geom_change_handler)
+            
+            editcommand_ended_handler = lambda lyr=lyr: self.handle_editcommand_ended_handler(lyr)
+            lyr.editCommandEnded.connect(editcommand_ended_handler)
+
+            editcommand_started_handler = lambda text, lyr=lyr: self.handle_editcommand_started_handler(lyr, text)
+            lyr.editCommandStarted.connect(editcommand_started_handler)
+
+            undostack_index_changed_handler = lambda idx, lyr=lyr: self.handle_undostack_index_changed_handler(lyr, idx)
+            self.undostack_index_changed_handler[lyr.id()] = undostack_index_changed_handler
+            lyr.undoStack().indexChanged.connect(undostack_index_changed_handler)
+            
+            # ----------------------
+
+            lyr.selectionChanged.connect(self.handle_selection_change)
+            lyr.attributeValueChanged.connect(lambda fid, idx, val, lyr=lyr: self.handle_attribute_change(lyr, fid, idx, val))
+
+            group.addLayer(lyr)
+        
+        print("Ferdig")
 
     def get_sld(self):
         sld_dict = {}
@@ -1242,15 +1112,15 @@ class NgisOpenApiClient:
             feature_with_avgrensinger['geometry'] = old_feature_json['geometry']
             body = {
                 
-                'feature': feature_with_avgrensinger, # todo andreas her skjer det noe rart med tuple
+                'feature': feature_with_avgrensinger,
                 'editedGeometry': new_feature_json['geometry'],
                 'affectedFeatures' : list(referenced_features.values())
                 }
 
             session = requests.Session()
-            session.proxies = {
-                'https': 'https://127.0.0.1:8888',
-                }
+            # session.proxies = {
+            #     'https': 'https://127.0.0.1:8888',
+            #     }
             x = session.post(url, json = body, verify=False)
             topology_response = json.loads(x.text)
             session.close()
@@ -1312,9 +1182,9 @@ class NgisOpenApiClient:
                         }
 
                     session = requests.Session()
-                    session.proxies = {
-                        'https': 'https://127.0.0.1:8888',
-                        }
+                    # session.proxies = {
+                    #     'https': 'https://127.0.0.1:8888',
+                    #     }
                     x = session.post(url, json = body, verify=False)
                     topology_response = json.loads(x.text)
                     session.close()
@@ -1352,9 +1222,9 @@ class NgisOpenApiClient:
                 }
 
             session = requests.Session()
-            session.proxies = {
-                'https': 'https://127.0.0.1:8888',
-                }
+            # session.proxies = {
+            #     'https': 'https://127.0.0.1:8888',
+            #     }
             x = session.post(url, json = body, verify=False)
             topology_response = json.loads(x.text)
             session.close()
@@ -1862,10 +1732,10 @@ class NgisOpenApiClient:
         
         ngis_features[lokalid] = affected_feature
 
-    #todo andreas: qgis klikket når jeg opprettet 2 linjestykker, markerte de og sjekket de inn, og deretter prøvde å opprette flate
+    #todo: qgis klikket når jeg opprettet 2 linjestykker, markerte de og sjekket de inn, og deretter prøvde å opprette flate
     #bug når man har sjekket inn linjer fra før av. og kun ønsker å opprette polygon. hvor kan man committe dette? :p
 
-    #Todo andreas: Mangler å håndtere caset der du har endret på linjestykker, deretter oppretter en ny flate som refererer til de samme eller andre linjestykker, deretter lagrer linjelaget, og deretter lagrer flatelaget. Her må man opprette egen spatialindex og identifisere topologien selv
+    #Todo: Mangler å håndtere caset der du har endret på linjestykker, deretter oppretter en ny flate som refererer til de samme eller andre linjestykker, deretter lagrer linjelaget, og deretter lagrer flatelaget. Her må man opprette egen spatialindex og identifisere topologien selv
     #TODO håndtere caset der du sletter et polygon, endrer litt på avgrensingslinjene, også oppretter nytt polygon
     
     
@@ -1986,6 +1856,7 @@ class NgisOpenApiClient:
         
 
     def run(self):
+    
         """Run method that performs all the real work"""
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
@@ -2008,3 +1879,231 @@ class NgisOpenApiClient:
 
         # show the dialog
         self.dlg.show()
+
+class MainTask(QgsTask):
+
+    resultSignal = pyqtSignal()
+    subtasks = []
+    result_dict = {}
+    description = None
+
+    def handleSubtaskResult(self, result):
+        feature_type = result[0]
+        geometry_dict = result[1]
+
+        self.result_dict[feature_type] = geometry_dict
+
+    def __init__(self, description, subtasks):
+        super().__init__(description, QgsTask.CanCancel)
+        self.subtasks = subtasks
+        self.description = description
+        for subtask in self.subtasks:
+            subtask.resultSignal.connect(self.handleSubtaskResult)
+            self.addSubTask(subtask)
+
+    def run(self):
+        finished = False
+        while not finished:
+            for subtask in self.subtasks:
+                if subtask.isActive():
+                    finished = False
+                    break
+                finished = True
+            time.sleep(1)
+        if finished:
+            self.resultSignal.emit()
+            return True
+
+    def finished(self, result):
+        print(f'Task {self.description} completed successfully')
+        #self.deleteLater()
+class ProcessFeatureTypeTask(QgsTask):
+        
+        resultSignal = pyqtSignal(object)
+
+        def __init__(self, description, feature_type, geojson, codec, layers, plugin):
+            super().__init__(description)
+            self.feature_type = feature_type
+            self.geojson = geojson
+            self.codec = codec
+            self.geometry_dict = {}  # To store the results
+            self.description = description
+            self.plugin = plugin
+            self.layers = layers
+            self.exception = None
+
+        def run(self):
+
+            # Create a new GeoJSON object containing a single featuretype
+            features_json = json.dumps(self.geojson, ensure_ascii=False)
+
+            # Identify fields and features from GeoJSON
+            
+            fields = QgsJsonUtils.stringToFields(features_json, self.codec)
+            newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, self.codec)
+
+
+            z = -99999
+            # 2. Fyll ut features i featuretypsene
+            if newFeatures:
+                for feature in newFeatures:
+
+                    feature_geom = feature.geometry()
+                    
+                    wkbtype = feature_geom.wkbType()
+                    if not QgsWkbTypes.hasZ(wkbtype):
+                        geom = feature_geom
+                        geom_type = geom.type()
+
+                        if geom_type == QgsWkbTypes.PointGeometry:
+                            geom_point = geom.asPoint()
+                            x, y = geom_point.x(), geom_point.y()
+                            feature.setGeometry(QgsGeometry.fromWkt(f'PointZ({x} {y} {z})'))
+                        
+                        elif geom_type == QgsWkbTypes.LineGeometry:
+                            points_3d = []
+                            for pt in geom.asPolyline():
+                                x, y = pt.x(), pt.y()
+                                points_3d.append(f"{x} {y} {z}")
+                            feature.setGeometry(QgsGeometry.fromWkt(f'LineStringZ({", ".join(points_3d)})'))
+                        
+                        elif geom_type == QgsWkbTypes.PolygonGeometry:
+                            rings_3d = []
+                            for ring in geom.asPolygon():
+                                points_3d = []
+                                for pt in ring:
+                                    x, y = pt.x(), pt.y()
+                                    points_3d.append(f"{x} {y} {z}")
+                                rings_3d.append(f"({', '.join(points_3d)})")
+                            feature.setGeometry(QgsGeometry.fromWkt(f'PolygonZ({", ".join(rings_3d)})'))
+
+
+                    geom_type_wkb_str = QgsWkbTypes.displayString(feature.geometry().wkbType())
+
+                    if geom_type_wkb_str not in self.geometry_dict:
+                        self.geometry_dict[geom_type_wkb_str] = []
+
+                    self.geometry_dict[geom_type_wkb_str].append(feature)
+
+
+            # oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+
+            slds = self.plugin.get_sld()
+
+            
+
+            for geom_type, features in self.geometry_dict.items():
+                layername = f'{self.feature_type}-{geom_type}'
+                lyr = self.layers.get(layername, None)
+                if lyr == None:
+                    lyr = QgsVectorLayer(f'{geom_type}?crs={self.plugin.crs_from_api}', layername, "memory")
+
+                self.plugin.feature_type_to_layer[self.feature_type] = lyr
+
+
+                QgsProject.instance().addMapLayer(lyr, False)
+
+                lyr.startEditing()
+
+                aux.add_fields_to_layer(lyr, self.feature_type, self.plugin.xsd)
+                #print(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}')
+                lyr.commitChanges()
+                l_d = lyr.dataProvider()
+                lyrfields = lyr.fields()
+
+                for feature in features:
+                    fet = QgsFeature()
+                    fet.setGeometry(feature.geometry())
+
+                    attributes = feature.attributes()
+                    newDict = {}
+                    for idx, attribute in enumerate(attributes):
+                        # TODO dette er sikkert ikke riktig. Mangler en del egenskaper
+                        fields = feature.fields()
+
+                        xsd_def = self.plugin.xsd[self.feature_type].get(fields.at(idx).name(), None)
+
+                        if isinstance(xsd_def, Geometry): continue
+                        if isinstance(xsd_def, Avgrensing): continue
+
+                        oldfield = fields.at(idx)
+                        if xsd_def and feature.attributes()[idx] != None and xsd_def.type == "enum" and xsd_def.maxOccurs > 1:
+                            vals = feature.attributes()[idx][3:-1]
+
+                            if isinstance(vals, list) == False:
+                                vals = feature.attributes()[idx][3:-1].split(",")
+
+                            vals = ','.join(vals)
+                            newDict[oldfield.name()] = f'{{{vals}}}'
+
+                        else:
+                            obj = {}
+                            if type(attribute) is dict:
+                                obj = attribute
+                                for key, value in obj.items():
+                                    newDict[key] = value
+                            else:
+                                try:
+                                    obj = json.loads(attribute)
+                                    for key, value in obj.items():
+                                        newDict[key] = value
+                                except:
+                                    newDict[oldfield.name()] = feature.attributes()[idx]
+
+                    fieldOrder = {}
+                    fet.initAttributes(len(lyrfields))
+                    fet.setFields(lyrfields)
+                    for fieldName in newDict.keys():
+                        newIdx = lyrfields.indexFromName(fieldName)
+                        fieldOrder[fieldName] = newIdx
+                        #print(f'{newIdx} - {newDict[fieldName]}')
+                        try:
+                            fet.setAttribute(newIdx, newDict[fieldName])
+                        except Exception as e:
+                            print(f"Exception when setting attribute {fieldName} on {lyr.id()}: {e}")
+                            pass
+                    l_d.addFeature(fet)
+                    self.plugin.old_geom_dict[(lyr.id(), fet['lokalId'])] = fet.geometry()
+
+
+                # update the extent of rev_lyr
+                lyr.updateExtents()
+                # save changes made in 'rev_lyr'
+                lyr.commitChanges()
+                self.layers[lyr.name()] = lyr
+
+
+                self.plugin.layer_dictionary[lyr.id()] = lyr
+                self.plugin.layers_pending_commit[lyr.id()] = set()
+                #self.layer_feature_history_dictionary[lyr.id()] = {}
+
+                # ------------------------------------
+
+
+
+                if self.feature_type in slds:
+                    lyr.loadSldStyle(slds[self.feature_type])
+
+                self.plugin.dataset_dictionary[lyr.id()] = self.plugin.selected_id
+                self.plugin.feature_type_dictionary[lyr.id()] = self.feature_type
+
+
+
+            for feature in self.geojson['features']:
+            #for feature in features_from_api:
+                self.plugin.oppdater_affected_features_topology(feature)
+                
+            # oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+
+            self.resultSignal.emit((self.feature_type, self.geometry_dict))
+
+            return True  # indicates successful completion
+    
+        def finished(self, result):
+            if result:
+                print(f'Task {self.description} completed successfully')
+            else:
+                if self.exception is None:
+                    print(f'Task {self.description} was not successful but did not raise an exception')
+                else:
+                    print(f'Task {self.description} was not successful and raised an exception')

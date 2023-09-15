@@ -261,7 +261,7 @@ class NgisOpenApiClient:
         icon_path = ':/plugins/ngis_openapi_client/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'NGIS-OpenAPI Test v1.4'),
+            text=self.tr(u'NGIS-OpenAPI Test v1.5'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
@@ -272,7 +272,7 @@ class NgisOpenApiClient:
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
-                self.tr(u'&NGIS-OpenAPI Test v1.4'),
+                self.tr(u'&NGIS-OpenAPI Test v1.5'),
                 action)
             self.iface.removeToolBarIcon(action)
 
@@ -362,7 +362,7 @@ class NgisOpenApiClient:
 
         body = {'features': features}
 
-        x = requests.post(url, json = body, verify=False)
+        x = requests.post(url, json = body)
 
         topology_responses = json.loads(x.text)
 
@@ -787,7 +787,7 @@ class NgisOpenApiClient:
             url = 'https://ngis-felleskomponent-test.azurewebsites.net/createGeometry'
             body = {'feature': new_feature}
 
-            x = requests.post(url, json = body, verify=False)
+            x = requests.post(url, json = body)
 
             affected_features = json.loads(x.text)
 
@@ -1121,7 +1121,8 @@ class NgisOpenApiClient:
             # session.proxies = {
             #     'https': 'https://127.0.0.1:8888',
             #     }
-            x = session.post(url, json = body, verify=False)
+            #x = session.post(url, json = body, verify=False)
+            x = session.post(url, json = body)
             topology_response = json.loads(x.text)
             session.close()
             affected_features = topology_response.get("affectedFeatures", [])
@@ -1185,7 +1186,8 @@ class NgisOpenApiClient:
                     # session.proxies = {
                     #     'https': 'https://127.0.0.1:8888',
                     #     }
-                    x = session.post(url, json = body, verify=False)
+                    #x = session.post(url, json = body, verify=False)
+                    x = session.post(url, json = body)
                     topology_response = json.loads(x.text)
                     session.close()
                     affected_features = topology_response.get("affectedFeatures", [])
@@ -1225,7 +1227,8 @@ class NgisOpenApiClient:
             # session.proxies = {
             #     'https': 'https://127.0.0.1:8888',
             #     }
-            x = session.post(url, json = body, verify=False)
+            #x = session.post(url, json = body, verify=False)
+            x = session.post(url, json = body)
             topology_response = json.loads(x.text)
             session.close()
             affected_features = topology_response.get("affectedFeatures", [])

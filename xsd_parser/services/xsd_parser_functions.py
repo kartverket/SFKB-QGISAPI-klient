@@ -116,7 +116,7 @@ class XsdParser:
         if xsdElement.defaultCodeSpace is None:
             return [Attribute(xsdElement.name, "string", xsdElement.minOccurs, xsdElement.maxOccurs, None, parentAttribute, xsdElement.documentation)]
 
-        response = session.get(f"{xsdElement.defaultCodeSpace}.json", verify=False)
+        response = session.get(f"{xsdElement.defaultCodeSpace}.json")
         json = response.json()
 
         enums = []

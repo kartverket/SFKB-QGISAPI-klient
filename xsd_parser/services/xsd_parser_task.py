@@ -7,6 +7,7 @@ from multiprocessing import Pool, Process
 from xsd_parser.services.xsd_parser_functions import XsdParser
 from xsd_parser.models.xsd_parser_models import XsdElement
 from PyQt5.QtCore import pyqtSignal
+import uuid
 
 from qgis.core import (
   QgsProcessingContext,
@@ -23,6 +24,7 @@ from qgis.core import (
 class FetchXsdElement(QgsTask):
 
     resultSignal = pyqtSignal(object)
+    id = None
 
     """This shows how to subclass QgsTask"""
     def __init__(self, description, elements, types, parent_map, element):
@@ -34,6 +36,10 @@ class FetchXsdElement(QgsTask):
         self.exception = None
         self.types = types
         self.parent_map = parent_map
+        self.id = uuid.uuid4()
+    
+    def getId(self):
+            return self.id
     
     def run(self):
 
@@ -54,7 +60,7 @@ class FetchXsdElement(QgsTask):
         # for egenskap in egenskaper:
         #     self.result_dict[self.element][egenskap.name] = egenskap
         
-        self.resultSignal.emit((self.element, egenskaper))
+        self.resultSignal.emit((self.id, self.element, egenskaper))
 
         session.close()
 
@@ -75,36 +81,50 @@ class MainTask(QgsTask):
     resultSignal = pyqtSignal(object)
     subtasks = []
     resultdict = {}
+    unfinished_subtasks = {}
+    id = None
 
     def handleSubtaskResult(self, result):
-        element = result[0]
-        egenskaper = result[1]
+        subtask_id = result[0]
+        element = result[1]
+        egenskaper = result[2]
         self.resultdict[element] = {}
         for egenskap in egenskaper:
             self.resultdict[element][egenskap.name] = egenskap
+        self.unfinished_subtasks.pop(subtask_id)
 
     def __init__(self, description, subtasks):
         super().__init__(description, QgsTask.CanCancel)
         self.subtasks = subtasks
+        self.id = uuid.uuid4()
+        
         for subtask in self.subtasks:
+            self.unfinished_subtasks[subtask.getId()] = subtask
             subtask.resultSignal.connect(self.handleSubtaskResult)
             self.addSubTask(subtask)
-
+    
+    def getId(self):
+        return self.id
+    
     def run(self):
-        finished = False
-        while not finished:
-            for subtask in self.subtasks:
-                if subtask.isActive():
-                    finished = False
-                    break
-                finished = True
-            time.sleep(1)
-        if finished:
-            return True
+        while True:
+            unfinished_tasks = [subtask.description for subtask in self.unfinished_subtasks.values()]
 
+            if unfinished_tasks:
+                print(f"Unfinished tasks: {', '.join(unfinished_tasks)}")
+            else:
+                print(f"Task {self.description} emitted resultSignal.")
+                self.resultSignal.emit(self.resultdict)
+                return True
+
+            if self.isCanceled():
+                print(f"Task {self.description} was cancelled.")
+                return False
+
+            time.sleep(1)
+    
     def finished(self, result):
-        self.resultSignal.emit(self.resultdict)
-        #self.deleteLater()
+        print(f'Task {self.description} completed successfully')
         
 def ParseXSD(xmlstring):
     try:
@@ -154,7 +174,7 @@ def ParseXSD(xmlstring):
 
     for element in elements:
         
-        subtask = FetchXsdElement(f"TASK_{element}", elements, types, parent_map, element)
+        subtask = FetchXsdElement(f"TASK_XSD_{element}", elements, types, parent_map, element)
         subtasks.append(subtask)
 
     task = MainTask('Tolkning GML-skjema', subtasks)

@@ -116,7 +116,7 @@ class NgisOpenApiClient:
 
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
-        
+        self.tm = QgsApplication.taskManager()
         self.first_start = None
         
         self.dataset_dictionary = {}
@@ -147,6 +147,7 @@ class NgisOpenApiClient:
         self.layer_features_deleted_handler = {}
         self.after_commit_changes_handler = {}
         self.before_commitchanges_handler = {}
+        self.layer_attribute_value_changed_handler = {}
         
         
         # Commit/Rollback
@@ -261,7 +262,7 @@ class NgisOpenApiClient:
         icon_path = ':/plugins/ngis_openapi_client/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'NGIS-OpenAPI Test v1.5'),
+            text=self.tr(u'NGIS-OpenAPI Test v0.51'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
@@ -272,7 +273,7 @@ class NgisOpenApiClient:
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
-                self.tr(u'&NGIS-OpenAPI Test v1.5'),
+                self.tr(u'&NGIS-OpenAPI Test v0.51'),
                 action)
             self.iface.removeToolBarIcon(action)
 
@@ -422,10 +423,9 @@ class NgisOpenApiClient:
             #resp = requests.get('http://skjema.geonorge.no/SOSI/produktspesifikasjon/Havnedata/2.0/Havnedata.xsd', verify=False)
             #resp = requests.get('https://havnedata.blob.core.windows.net/skjema/Havnedata_testdemo.xsd', verify=False)
 
-            
             self.task = ParseXSD(resp.content)
             self.task.resultSignal.connect(self.receive_parsed_xsd)
-            QgsApplication.taskManager().addTask(self.task)
+            self.tm.addTask(self.task)
 
             return
         
@@ -453,9 +453,14 @@ class NgisOpenApiClient:
             #metadata_from_api.bbox['ll']=[270083.13, 6522356.34]
 
             epsg = metadata_from_api.crs_epsg
+            
+            print("Starter nedlasting av data fra NGIS-OpenAPI")
+
             if features_from_api is None:
                 features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
             
+            print("Nedlasting av data fra NGIS-OpenAPI er ferdig")
+
             #current_dir = os.path.dirname(os.path.realpath(__file__))
             #result_path = os.path.join(current_dir, 'features_from_api.pkl')
             #with open(result_path, 'wb') as f:
@@ -468,6 +473,8 @@ class NgisOpenApiClient:
 
 
         #features_from_api['features'] = None
+
+        print(f"Oppretter tabell Kodelister")
 
         complex_multiple = {}
 
@@ -506,7 +513,9 @@ class NgisOpenApiClient:
                     group_kodelister.addLayer(lyr)
 
         layers = {}
-
+        
+        print(f"Oppretter tabell Komplekse")
+        
         for parentName, childs in complex_multiple.items():
             lyr = QgsVectorLayer('NoGeometry?crs=EPSG:4326', f'{parentName}', "memory")
             lyr.setCustomProperty("skipMemoryLayersCheck", 1) #13012022
@@ -526,6 +535,8 @@ class NgisOpenApiClient:
         geometry_dict = {}
 
         # Utled feature types basert på xsd
+        
+        print(f"Utleder feature types basert på xsd")
 
         for featureTypeName, featureType in self.xsd.items():
 
@@ -577,6 +588,7 @@ class NgisOpenApiClient:
 
         subtasks = []
 
+
         for feature_type, features_list in features_by_type.items():
 
             # Your processing logic for a single feature_type comes here
@@ -584,20 +596,26 @@ class NgisOpenApiClient:
             features_dict['features'] = features_list
             subtask = ProcessFeatureTypeTask(f"MAP TASK {feature_type}",feature_type, features_dict, codec, layers, self)
             #subtask.run()
-            subtasks.append(subtask)
+            subtasks.append(subtask) #andreas
+
+        print(f"Oppretter main task med {len(subtasks)} subtasks")
 
         task = MainTask('MAP TASK MAIN', subtasks)
-        
+        #task.run()
         #parser_handler = lambda geometry_dict, layers=layers, crs_from_api=crs_from_api, features_from_api=features_from_api: self.del3(geometry_dict, layers, crs_from_api, features_from_api)
         #task.resultSignal.connect(parser_handler)
         
         parser_handler = lambda layers=layers: self.add_layers_to_group(layers)
         task.resultSignal.connect(parser_handler)
-        QgsApplication.taskManager().addTask(task)
+
+        print(f"Legger til task i task manager")
+        self.tm.addTask(task)
     
     def add_layers_to_group(self, layers):
        
         group = self.create_group(self.selected_name)
+
+        print(f"Adding layers to group {''.join(sorted(list(layers.keys())))}")
 
         for layername in sorted(list(layers.keys())):
             lyr = layers[layername]
@@ -640,7 +658,12 @@ class NgisOpenApiClient:
             # ----------------------
 
             lyr.selectionChanged.connect(self.handle_selection_change)
-            lyr.attributeValueChanged.connect(lambda fid, idx, val, lyr=lyr: self.handle_attribute_change(lyr, fid, idx, val))
+            
+            attribute_vale_changed_handler = lambda fid, idx, val, lyr=lyr: self.handle_attribute_change(lyr, fid, idx, val)
+            self.layer_attribute_value_changed_handler[lyr.id()] = attribute_vale_changed_handler
+            lyr.attributeValueChanged.connect(attribute_vale_changed_handler)
+
+            print(f"Adding layer {lyr.id()} {lyr.name()} to group {group.name()}")
 
             group.addLayer(lyr)
         
@@ -866,6 +889,7 @@ class NgisOpenApiClient:
         geom = QgsGeometry.fromWkt(geom.ExportToWkt())
 
         lyr.featureAdded.disconnect(self.layer_feature_added_handler[lyr.id()])
+        lyr.attributeValueChanged.disconnect(self.layer_attribute_value_changed_handler[lyr.id()])
 
         dataProvider = lyr.dataProvider()
         undo_stack = lyr.undoStack()
@@ -887,6 +911,7 @@ class NgisOpenApiClient:
         undo_stack.endMacro()
 
         lyr.featureAdded.connect(self.layer_feature_added_handler[lyr.id()])
+        lyr.attributeValueChanged.connect(self.layer_attribute_value_changed_handler[lyr.id()])
         return lyr, feat
 
     def find_ngis_feature_in_canvas(self, ngis_feature):
@@ -1889,33 +1914,47 @@ class MainTask(QgsTask):
     subtasks = []
     result_dict = {}
     description = None
+    unfinished_subtasks = None
+    id = None
 
     def handleSubtaskResult(self, result):
-        feature_type = result[0]
-        geometry_dict = result[1]
-
+        subtask_id = result[0]
+        feature_type = result[1]
+        geometry_dict = result[2]
         self.result_dict[feature_type] = geometry_dict
+        self.unfinished_subtasks.pop(subtask_id)
 
     def __init__(self, description, subtasks):
         super().__init__(description, QgsTask.CanCancel)
         self.subtasks = subtasks
         self.description = description
+        self.unfinished_subtasks = {}
+        self.id = uuid.uuid4()
+
         for subtask in self.subtasks:
+            self.unfinished_subtasks[subtask.getId()] = subtask
             subtask.resultSignal.connect(self.handleSubtaskResult)
             self.addSubTask(subtask)
+    
+    def getId(self):
+        return self.id
 
     def run(self):
-        finished = False
-        while not finished:
-            for subtask in self.subtasks:
-                if subtask.isActive():
-                    finished = False
-                    break
-                finished = True
+        while True:
+            unfinished_tasks = [subtask.description for subtask in self.unfinished_subtasks.values()]
+
+            if unfinished_tasks:
+                print(f"Unfinished tasks: {', '.join(unfinished_tasks)}")
+            else:
+                print(f'Task {self.description} emitting resultSignal')
+                self.resultSignal.emit()
+                return True
+
+            if self.isCanceled():
+                print(f"Task {self.description} was cancelled.")
+                return False
+
             time.sleep(1)
-        if finished:
-            self.resultSignal.emit()
-            return True
 
     def finished(self, result):
         print(f'Task {self.description} completed successfully')
@@ -1923,6 +1962,7 @@ class MainTask(QgsTask):
 class ProcessFeatureTypeTask(QgsTask):
         
         resultSignal = pyqtSignal(object)
+        id = None
 
         def __init__(self, description, feature_type, geojson, codec, layers, plugin):
             super().__init__(description)
@@ -1934,8 +1974,13 @@ class ProcessFeatureTypeTask(QgsTask):
             self.plugin = plugin
             self.layers = layers
             self.exception = None
+            self.id = uuid.uuid4()
+        
+        def getId(self):
+            return self.id
 
         def run(self):
+            print(f"Running task: {self.description}")
 
             # Create a new GeoJSON object containing a single featuretype
             features_json = json.dumps(self.geojson, ensure_ascii=False)
@@ -1993,18 +2038,20 @@ class ProcessFeatureTypeTask(QgsTask):
 
             slds = self.plugin.get_sld()
 
-            
+            relevant_attributes = self.plugin.xsd[self.feature_type]
+            relevant_attributes = aux.of_type(relevant_attributes.values(), Attribute)
+            relevant_attributes = set([a.name for a in relevant_attributes])
+            relevant_attributes.add('featuretype')
 
             for geom_type, features in self.geometry_dict.items():
                 layername = f'{self.feature_type}-{geom_type}'
                 lyr = self.layers.get(layername, None)
                 if lyr == None:
+                    raise Exception(f"Layer {layername} not found 1")
                     lyr = QgsVectorLayer(f'{geom_type}?crs={self.plugin.crs_from_api}', layername, "memory")
 
-                self.plugin.feature_type_to_layer[self.feature_type] = lyr
-
-
-                QgsProject.instance().addMapLayer(lyr, False)
+                #self.plugin.feature_type_to_layer[self.feature_type] = lyr
+                #QgsProject.instance().addMapLayer(lyr, False)
 
                 lyr.startEditing()
 
@@ -2057,6 +2104,10 @@ class ProcessFeatureTypeTask(QgsTask):
                     fet.initAttributes(len(lyrfields))
                     fet.setFields(lyrfields)
                     for fieldName in newDict.keys():
+                        
+                        if fieldName not in relevant_attributes: 
+                            continue
+
                         newIdx = lyrfields.indexFromName(fieldName)
                         fieldOrder[fieldName] = newIdx
                         #print(f'{newIdx} - {newDict[fieldName]}')
@@ -2098,7 +2149,7 @@ class ProcessFeatureTypeTask(QgsTask):
                 
             # oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
 
-            self.resultSignal.emit((self.feature_type, self.geometry_dict))
+            self.resultSignal.emit((self.id, self.feature_type, self.geometry_dict))
 
             return True  # indicates successful completion
     

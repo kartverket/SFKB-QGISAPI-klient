@@ -572,12 +572,22 @@ class NgisOpenApiClient:
                 lyr = QgsVectorLayer(f'{geom_type}?crs={crs_from_api}', layername, "memory")
                 
                 self.feature_type_to_layer[feature_type] = lyr
+                self.feature_type_dictionary[lyr.id()] = feature_type
+                self.layer_dictionary[lyr.id()] = lyr
+                self.layers_pending_commit[lyr.id()] = set()
+                self.dataset_dictionary[lyr.id()] = self.selected_id
+
+                # Add correct field to layer
+                lyr.startEditing()
+                aux.add_fields_to_layer(lyr, feature_type, self.xsd)
+                lyr.commitChanges()
 
                 QgsProject.instance().addMapLayer(lyr, False)
                 layers[layername] = lyr
 
+                
 
-        features_by_type = {}
+        features_by_type = {key: [] for key in self.feature_type_to_layer.keys()}
 
         # Extract features from GeoJSON into dictionary
         for feature in features_from_api['features']:
@@ -2038,6 +2048,8 @@ class ProcessFeatureTypeTask(QgsTask):
 
             slds = self.plugin.get_sld()
 
+
+
             relevant_attributes = self.plugin.xsd[self.feature_type]
             relevant_attributes = aux.of_type(relevant_attributes.values(), Attribute)
             relevant_attributes = set([a.name for a in relevant_attributes])
@@ -2054,10 +2066,6 @@ class ProcessFeatureTypeTask(QgsTask):
                 #QgsProject.instance().addMapLayer(lyr, False)
 
                 lyr.startEditing()
-
-                aux.add_fields_to_layer(lyr, self.feature_type, self.plugin.xsd)
-                #print(f'{geom_type}?crs={crs_from_api}', f'{feature_type}-{geom_type}')
-                lyr.commitChanges()
                 l_d = lyr.dataProvider()
                 lyrfields = lyr.fields()
 
@@ -2127,8 +2135,8 @@ class ProcessFeatureTypeTask(QgsTask):
                 self.layers[lyr.name()] = lyr
 
 
-                self.plugin.layer_dictionary[lyr.id()] = lyr
-                self.plugin.layers_pending_commit[lyr.id()] = set()
+                #self.plugin.layer_dictionary[lyr.id()] = lyr #todo andreas
+                #self.plugin.layers_pending_commit[lyr.id()] = set()
                 #self.layer_feature_history_dictionary[lyr.id()] = {}
 
                 # ------------------------------------
@@ -2138,8 +2146,8 @@ class ProcessFeatureTypeTask(QgsTask):
                 if self.feature_type in slds:
                     lyr.loadSldStyle(slds[self.feature_type])
 
-                self.plugin.dataset_dictionary[lyr.id()] = self.plugin.selected_id
-                self.plugin.feature_type_dictionary[lyr.id()] = self.feature_type
+               # self.plugin.dataset_dictionary[lyr.id()] = self.plugin.selected_id
+                #self.plugin.feature_type_dictionary[lyr.id()] = self.feature_type
 
 
 

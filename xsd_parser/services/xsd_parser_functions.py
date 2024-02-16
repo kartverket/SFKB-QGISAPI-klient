@@ -197,7 +197,7 @@ class XsdParser:
                     return result
             elif sequence is not None:
                 if not ref:
-                    parentAttribute = Attribute(xsdElement.name, "complexType", xsdElement.minOccurs, xsdElement.maxOccurs, None, parentAttribute, xsdElement.documentation)
+                    parentAttribute = Attribute(xsdElement.name, xsdElement.typeName, xsdElement.minOccurs, xsdElement.maxOccurs, None, parentAttribute, xsdElement.documentation)
                 if self.debug: print("sequence")
                 return self.add_sekvens(sequence, parentAttribute, session)
             else:

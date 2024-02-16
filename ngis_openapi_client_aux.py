@@ -1,4 +1,5 @@
 import json
+import uuid
 from qgis.core import (
     QgsProject,
     QgsPathResolver,
@@ -25,7 +26,8 @@ from qgis.core import (
     QgsApplication,
     QgsMessageLog,
     QgsFields,
-    QgsField
+    QgsField,
+    QgsRelation
 )
 from PyQt5.QtCore import QVariant, QSettings, QTranslator, QCoreApplication, QTextCodec, QDate
 
@@ -81,7 +83,7 @@ def try_parse_json(myjson):
 def of_type(iterable, target_type):
         return [i for i in iterable if isinstance(i, target_type)]
 
-def xsd_to_fields(lyr, xsd_def):
+def xsd_to_fields(lyr, xsd_def, complex_multiple_lyr = {}):
     
 
     for fieldName, field_def in xsd_def.items():
@@ -105,6 +107,23 @@ def xsd_to_fields(lyr, xsd_def):
             field = QgsField(fieldName, QVariant.Double, comment = field_def.documentation)
         elif field_type == "boolean":
             field = QgsField(fieldName, QVariant.Bool, comment = field_def.documentation)
+        elif  "PropertyType" in field_type:
+            xsdChildName = field_type.split("PropertyType")[0]
+            relation_layer = complex_multiple_lyr.get(xsdChildName, None)
+            if relation_layer is None:
+                raise Exception(f"Relation layer not found for {xsdChildName}")
+            relation = QgsRelation()
+            relation_id = str(uuid.uuid4())
+            relation.setId(relation_id) 
+            relation.setName(fieldName)
+            relation.setReferencingLayer(relation_layer.id())  # Child layer
+            relation.setReferencedLayer(lyr.id())  # Parent layer
+            relation.addFieldPair('lokalId', 'lokalId')
+            QgsProject.instance().relationManager().addRelation(relation)
+            if not relation.isValid(): 
+                raise Exception(f"Relation not valid for {xsdChildName}")     
+            continue            
+        
         else:
             field = QgsField(fieldName, QVariant.String, comment = field_def.documentation)
 
@@ -148,12 +167,8 @@ def xsd_to_fields(lyr, xsd_def):
             form_config.setReadOnly(field_idx, True)
             lyr.setEditFormConfig(form_config)
 
-def add_fields_to_layer(lyr, feature_type, xsd):
+def add_featuretype_field_to_layer(lyr, feature_type):
 
-    xsd_def = xsd[feature_type]
-    
-    xsd_to_fields(lyr, xsd_def)
-    
     # Featuretype should not be writable
     lyr.addAttribute(QgsField("featuretype", QVariant.String))
     featuretype_idx = lyr.fields().indexOf("featuretype")

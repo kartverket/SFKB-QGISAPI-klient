@@ -5,7 +5,7 @@ import requests
 import time
 from multiprocessing import Pool, Process
 from xsd_parser.services.xsd_parser_functions import XsdParser
-from xsd_parser.models.xsd_parser_models import XsdElement
+from xsd_parser.models.xsd_parser_models import XsdElement, Attribute
 from PyQt5.QtCore import pyqtSignal
 import uuid
 
@@ -90,7 +90,11 @@ class MainTask(QgsTask):
         egenskaper = result[2]
         self.resultdict[element] = {}
         for egenskap in egenskaper:
-            self.resultdict[element][egenskap.name] = egenskap
+            if (isinstance(egenskap, Attribute) and egenskap.parentAttribute is not None and egenskap.parentAttribute.maxOccurs > 1):
+                self.resultdict[element].setdefault(egenskap.parentAttribute.name, egenskap.parentAttribute)
+            else:
+                self.resultdict[element][egenskap.name] = egenskap
+                
         self.unfinished_subtasks.pop(subtask_id)
 
     def __init__(self, description, subtasks):
@@ -163,7 +167,7 @@ def ParseXSD(xmlstring):
 
 
     
-    # #DEBUG
+    #DEBUG
     # for element in elements:
         
     #     subtask = FetchXsdElement(f"TASK_{element}", elements, types, parent_map, element)

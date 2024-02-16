@@ -137,6 +137,7 @@ class NgisOpenApiClient:
         #self.affected_features = {} # todo maybe integrate with affected_features_topology
         self.affected_features_topology = {}
         self.old_geom_dict = {}
+        self.complex_multiple = {}
 
         self.features_pending_replacement = {}
 
@@ -485,10 +486,13 @@ class NgisOpenApiClient:
                 if not isinstance(attrVerdi, Attribute): continue
 
                 #todo flytt denne til xsd-parser? fjern atributter som ikke skal være flatet ut
-                if (attrVerdi.parentAttribute is not None and attrVerdi.parentAttribute.maxOccurs > 1):
-                    entry = complex_multiple.get(attrVerdi.parentAttribute.name, {})
-                    entry[attrVerdi.name] = attrVerdi
-                    complex_multiple[attrVerdi.parentAttribute.name] = entry
+                if (attrVerdi.maxOccurs > 1 and "PropertyType" in attrVerdi.type):
+                    xsdChildName = attrVerdi.type.split("PropertyType")[0]
+                    entry = complex_multiple.get(xsdChildName, {})
+                    childs = self.xsd.get(xsdChildName, {})
+                    for childName, childVerdi in childs.items():
+                        entry[childName] = childVerdi
+                    complex_multiple[xsdChildName] = entry
 
                 if (attrVerdi.type == 'enum' and attrVerdi.maxOccurs > 1):
                     vector_names = [l.name() for l in QgsProject().instance().mapLayers().values() if isinstance(l, QgsVectorLayer)]
@@ -516,20 +520,24 @@ class NgisOpenApiClient:
         
         print(f"Oppretter tabell Komplekse")
         
-        for parentName, childs in complex_multiple.items():
+        complex_multiple_lyr = {}
+
+        for parentName, xsd_def in complex_multiple.items():
             lyr = QgsVectorLayer('NoGeometry?crs=EPSG:4326', f'{parentName}', "memory")
             lyr.setCustomProperty("skipMemoryLayersCheck", 1) #13012022
             lyr.startEditing()
 
             #Legger til ekstra felter slik at dette kan kobles inn i attributtvelgern
             lyr.addAttribute(QgsField("lokalId", QVariant.String))
-            lyr.addAttribute(QgsField("key", QVariant.String))
-            aux.xsd_to_fields(lyr, childs)
+            #andreeeas
+            #self.complex_multiple[]
+            aux.xsd_to_fields(lyr, xsd_def, None)
 
             lyr.commitChanges()
             QgsProject.instance().addMapLayer(lyr, False)
 
             group_komplekse.addLayer(lyr)
+            complex_multiple_lyr[parentName] = lyr
 
         # If different geometry types are identified, separate them into individual layers
         geometry_dict = {}
@@ -579,10 +587,14 @@ class NgisOpenApiClient:
 
                 # Add correct field to layer
                 lyr.startEditing()
-                aux.add_fields_to_layer(lyr, feature_type, self.xsd)
-                lyr.commitChanges()
-
                 QgsProject.instance().addMapLayer(lyr, False)
+
+                xsd_def = self.xsd[feature_type]
+                aux.add_featuretype_field_to_layer(lyr, feature_type)
+                aux.xsd_to_fields(lyr, xsd_def, complex_multiple_lyr)
+                
+                lyr.commitChanges()
+                
                 layers[layername] = lyr
 
                 
@@ -1633,62 +1645,110 @@ class NgisOpenApiClient:
             "geometry" : feature_json["geometry"]
         }
 
-        properties = {}
-        for ele, val in xsd_entry.items():
-
-            if ele in feature_json["properties"]:
-                value = feature_json["properties"][ele]
-                if value is not None:
-                    if val.type == "integer":
-                        value = int(value)
-                    elif val.type == "double":
-                        value = float(value)
-                    elif val.type == "enum":
-                        if val.maxOccurs > 1:
-                            value = value[1:-1].split(", ") if len(value[1:-1]) > 0 else []
-                        else:
-                            val_list = [a["type"] for a in val.values]
-                            try:
-                                position = val_list.index(value)
-                                value = val.values[position]["value"]
-                            except Exception:
-                                continue
-                    parent = val.parentAttribute
-                    if parent is not None:
-                        # Only one complex-element (maton, 01.11.2022)
-                        # if (val.xmlPath[0] == 'identifikasjon' or val.xmlPath[0] == 'kvalitet'):
-
-                        if parent.parentAttribute is not None:
-                            raise Exception("Nested schema not yet implemented")
-
-                        parentName = parent.name
-
-                        if parent.maxOccurs <= 1:
-
-                            if parent.name in properties:
-                                properties[parent.name][ele] = value
-                            else:
-                                properties[parent.name] = {
-                                    ele : value
-                                }
-                        #kompleks, multippel egenskap
-                        else:
-                            raise Exception("Komplekse multiple egenskaper not yet implemented")
-
-                        # Assuming multiple complex elements
-                        #else:
-                        #    if val.xmlPath[0] in properties:
-                        #        properties[val.xmlPath[0]][0][ele] = value
-                        #    else:
-                        #        properties[val.xmlPath[0]] = [{
-                        #            ele : value
-                        #        }]
-                    else:
-                        properties[ele] = value
-
-        properties["featuretype"] = self.feature_type_dictionary[lyr.id()]
-        new_feature["properties"] = properties
+        layer_relations_referencing, layer_relations_referenced = self.get_layer_relations(lyr.id(), feature)
+        relational_attributes = self.get_relational_attributes(xsd_entry, layer_relations_referenced)
+        
+        original_properties = feature_json["properties"]
+        formatted_properties = {}
+        self.format_geojson_values(xsd_entry, original_properties, formatted_properties)
+        formatted_properties["featuretype"] = self.feature_type_dictionary[lyr.id()]
+        formatted_properties.update(relational_attributes)
+        new_feature["properties"] = formatted_properties
+        
         return new_feature
+
+    def format_geojson_values(self, xsd_entry, original_properties, formatted_properties):
+        
+        for property_name, xsd_element in xsd_entry.items():
+            if property_name in original_properties:
+                value = original_properties[property_name]
+                if value is None: return
+                if xsd_element.type == "integer":
+                    value = int(value)
+                elif xsd_element.type == "double":
+                    value = float(value)
+                elif xsd_element.type == "enum":
+                    if xsd_element.maxOccurs > 1:
+                        value = value[1:-1].split(", ") if len(value[1:-1]) > 0 else []
+                    else:
+                        val_list = [a["type"] for a in xsd_element.values]
+                        try:
+                            position = val_list.index(value)
+                            value = xsd_element.values[position]["value"]
+                        except Exception:
+                            return
+                parent = xsd_element.parentAttribute
+                if parent is not None:
+                    # Only one complex-element (maton, 01.11.2022)
+                    # if (val.xmlPath[0] == 'identifikasjon' or val.xmlPath[0] == 'kvalitet'):
+
+                    if parent.parentAttribute is not None:
+                        raise Exception("Nested schema not yet implemented")
+
+                    parent_name = parent.name
+
+                    if parent.maxOccurs <= 1:
+
+                        if parent_name in formatted_properties:
+                            formatted_properties[parent_name][property_name] = value
+                        else:
+                            formatted_properties[parent_name] = {
+                                property_name : value
+                            }
+                    #kompleks, multippel egenskap håndteres tidligere
+                    else:
+                        raise Exception("Komplekse multiple egenskaper should be handled prior to this point.")
+
+                else:
+                    formatted_properties[property_name] = value
+
+       
+
+    def get_relational_attributes(self, xsd_entry, relations):
+        
+        relational_attributes = {}
+
+        for relation_lyr, relation_info in relations.items():
+            for ele, val in xsd_entry.items():
+                if not isinstance(val, Attribute): continue
+                property_type = val.type.split("PropertyType")
+                if len(property_type) == 1: continue
+                property_type = property_type[0]
+                property_type_xsd = self.xsd.get(property_type, None)
+                if relation_lyr.name() == property_type:
+                    # Relation found in the xsd, should therfore be included
+                    export = QgsJsonExporter(relation_lyr)
+                    export.setSourceCrs(QgsCoordinateReferenceSystem())
+                    feature_json = []
+                    for feature in relation_info["rel_features"]:
+                        feat_json = json.loads(export.exportFeature(feature))["properties"]
+                        for field in relation_info["rel_fields"]:
+                            feat_json.pop(relation_lyr.fields()[field].name(), None)
+                        formatted_properties = {}
+                        self.format_geojson_values(property_type_xsd, feat_json, formatted_properties)
+                        feature_json.append(formatted_properties[property_type])
+                    relational_attributes[ele] = feature_json
+                return relational_attributes
+
+    def get_layer_relations(self, layer_id, feature):
+        relation_manager = QgsProject.instance().relationManager()
+
+        # Initialize an empty list to hold relations for the specified layer
+        layer_relations_referencing = {}
+        layer_relations_referenced = {}
+
+        # Iterate through all relations and add those related to the specified layer
+        for relation in relation_manager.relations().values():
+            if relation.referencingLayerId() == layer_id:
+                rel_features = list(relation.getRelatedFeatures(feature))
+                rel_fields = relation.referencedFields()
+                layer_relations_referencing[relation.referencedLayer()] = {"rel_features" : rel_features, "rel_fields": rel_fields}
+            elif relation.referencedLayerId() == layer_id:
+                rel_features = list(relation.getRelatedFeatures(feature))
+                rel_fields = relation.referencingFields()
+                layer_relations_referenced[relation.referencingLayer()] = {"rel_features" : rel_features, "rel_fields": rel_fields}
+
+        return layer_relations_referencing, layer_relations_referenced
 
     def handle_committed_features_added(self, commited_layer, added_features):
 
@@ -1826,6 +1886,9 @@ class NgisOpenApiClient:
 
 
     def handle_debug2_commands(self):
+        print("debug")
+        # Implement logic to handle the dialog's output, such as updating feature attributes
+        pass
         #lyr = self.iface.activeLayer()
         #undo_stack = lyr.undoStack()
         #undo_stack.endMacro()

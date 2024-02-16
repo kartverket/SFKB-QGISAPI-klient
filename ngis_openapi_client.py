@@ -1662,7 +1662,7 @@ class NgisOpenApiClient:
         for property_name, xsd_element in xsd_entry.items():
             if property_name in original_properties:
                 value = original_properties[property_name]
-                if value is None: return
+                if value is None: continue
                 if xsd_element.type == "integer":
                     value = int(value)
                 elif xsd_element.type == "double":
@@ -1676,7 +1676,7 @@ class NgisOpenApiClient:
                             position = val_list.index(value)
                             value = xsd_element.values[position]["value"]
                         except Exception:
-                            return
+                            continue
                 parent = xsd_element.parentAttribute
                 if parent is not None:
                     # Only one complex-element (maton, 01.11.2022)
@@ -1728,7 +1728,8 @@ class NgisOpenApiClient:
                         self.format_geojson_values(property_type_xsd, feat_json, formatted_properties)
                         feature_json.append(formatted_properties[property_type])
                     relational_attributes[ele] = feature_json
-                return relational_attributes
+        
+        return relational_attributes
 
     def get_layer_relations(self, layer_id, feature):
         relation_manager = QgsProject.instance().relationManager()

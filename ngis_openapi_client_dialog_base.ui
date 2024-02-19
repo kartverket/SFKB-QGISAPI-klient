@@ -132,32 +132,6 @@
     <string>Verktøy:</string>
    </property>
   </widget>
-  <widget class="QPushButton" name="debugButton">
-   <property name="geometry">
-    <rect>
-     <x>470</x>
-     <y>160</y>
-     <width>81</width>
-     <height>41</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Debug 1</string>
-   </property>
-  </widget>
-  <widget class="QPushButton" name="debugButton2">
-   <property name="geometry">
-    <rect>
-     <x>470</x>
-     <y>200</y>
-     <width>81</width>
-     <height>41</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Debug 2</string>
-   </property>
-  </widget>
  </widget>
  <customwidgets>
   <customwidget>

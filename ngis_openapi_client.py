@@ -58,7 +58,8 @@ from qgis.core import (
     QgsPalLayerSettings, 
     QgsVectorLayerSimpleLabeling,
     QgsSpatialIndex,
-    QgsPointXY
+    QgsPointXY,
+    QgsPoint
 )
 
 import math
@@ -137,8 +138,6 @@ class NgisOpenApiClient:
         #self.affected_features = {} # todo maybe integrate with affected_features_topology
         self.affected_features_topology = {}
         self.old_geom_dict = {}
-        self.complex_multiple = {}
-
         self.features_pending_replacement = {}
 
         # Handlers
@@ -449,23 +448,24 @@ class NgisOpenApiClient:
         try:
             self.avgrenser, self.avgrensesAv = aux.utledAvgrensinger(self.xsd)
 
-            #raise Exception()
-            #metadata_from_api.bbox['ur'] = [336509.55, 6578691.58]
-            #metadata_from_api.bbox['ll']=[270083.13, 6522356.34]
-
             epsg = metadata_from_api.crs_epsg
             
             print("Starter nedlasting av data fra NGIS-OpenAPI")
 
             if features_from_api is None:
-                features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
+               features_from_api = self.client.getDatasetFeatures(metadata_from_api.id, metadata_from_api.bbox, epsg)
             
             print("Nedlasting av data fra NGIS-OpenAPI er ferdig")
 
-            #current_dir = os.path.dirname(os.path.realpath(__file__))
-            #result_path = os.path.join(current_dir, 'features_from_api.pkl')
-            #with open(result_path, 'wb') as f:
+            # current_dir = os.path.dirname(os.path.realpath(__file__))
+            # result_path = os.path.join(current_dir, 'features_from_api.pkl')
+            # with open(result_path, 'wb') as f:
             #   pickle.dump(features_from_api, f)
+
+            # with open(result_path, 'rb') as f:
+            #    result = pickle.load(f)
+            #    features_from_api = result
+              
         except Exception as e:
             error = aux.ApiError("Nedlasting av data mislyktes", "Kunne ikke laste ned datasett", e)
             self.iface.messageBar().pushMessage(error.title, error.detail, error.show_more, level=2, duration=10)
@@ -529,8 +529,6 @@ class NgisOpenApiClient:
 
             #Legger til ekstra felter slik at dette kan kobles inn i attributtvelgern
             lyr.addAttribute(QgsField("lokalId", QVariant.String))
-            #andreeeas
-            #self.complex_multiple[]
             aux.xsd_to_fields(lyr, xsd_def, None)
 
             lyr.commitChanges()
@@ -612,13 +610,13 @@ class NgisOpenApiClient:
 
 
         for feature_type, features_list in features_by_type.items():
-
+            
             # Your processing logic for a single feature_type comes here
             features_dict = features_from_api.copy()
             features_dict['features'] = features_list
             subtask = ProcessFeatureTypeTask(f"MAP TASK {feature_type}",feature_type, features_dict, codec, layers, self)
             #subtask.run()
-            subtasks.append(subtask) #andreas
+            subtasks.append(subtask)
 
         print(f"Oppretter main task med {len(subtasks)} subtasks")
 
@@ -1885,76 +1883,10 @@ class NgisOpenApiClient:
             self.iface.messageBar().pushMessage(error.title, error.detail, error.show_more, level=2, duration=10)
             raise
 
-
-    def handle_debug2_commands(self):
-        print("debug")
-        # Implement logic to handle the dialog's output, such as updating feature attributes
-        pass
-        #lyr = self.iface.activeLayer()
-        #undo_stack = lyr.undoStack()
-        #undo_stack.endMacro()
-        pass
-                                              
+                                  
     def handle_debug_commands(self):
-        
-        #lyr.undoStack().indexChanged.disconnect(self.undostack_index_changed_handler[lyr.id()])
-        lyr = self.iface.activeLayer()
-        undo_stack = lyr.undoStack()
-        undo_stack.beginMacro("Test")
-        #current_index = undo_stack.index()
-        #undo_stack.setIndex(current_index-1)
-        #lyr.undoStack().indexChanged.connect(self.undostack_index_changed_handler[lyr.id()])
-        #current_dir = os.path.dirname(os.path.realpath(__file__))
-        
-        # result_path = os.path.join(current_dir, 'xsd.pkl')
-        # with open(result_path, 'rb') as f:
-        #    result = pickle.load(f)
-        #    self.xsd = result
-        
-        # result_path = os.path.join(current_dir, 'metadata_from_api.pkl')
-        # with open(result_path, 'rb') as f:
-        #    result = pickle.load(f)
-        #    self.metadata_from_api = result
-
-        # result_path = os.path.join(current_dir, 'features_from_api.pkl')
-        # with open(result_path, 'rb') as f:
-        #    result = pickle.load(f)
-        #    features_from_api = result
-
-        # self.selected_id = 'ad1e3ee1-5e47-402f-b4f4-c8f0de0ff2df'
-        # self.selected_name = 'Risavika_v3_ 22'
-        # self.download_and_add_layer(self.metadata_from_api, self.selected_name, features_from_api)
-
-           
-        # Get the current snapping configuration
-        # snapping_config = QgsProject.instance().snappingConfig()
-
-        # # Set snapping mode to "No snapping"
-        # snapping_config.setEnabled(False)
-
-        # # Apply the new snapping configuration
-        # QgsProject.instance().setSnappingConfig(snapping_config)
-        
-        # self.iface.mapCanvas().refreshAllLayers()
-        # self.iface.mapCanvas().refresh()       
-        
-        # self.affected_features = {}
-        # self.affected_features_topology = {}
-
-        # print("Debug commands finished")
-
-        # import xsd_parser.services.xsd_parser_task
-        # importlib.reload(xsd_parser.services.xsd_parser_task)
-        # import xsd_parser.services.xsd_parser_task
-
-        
-        # import xsd_parser.services.xsd_parser_functions
-        # importlib.reload(xsd_parser.services.xsd_parser_functions)
-        # import xsd_parser.services.xsd_parser_functions
-
-        # import xsd_parser.models.xsd_parser_models
-        # importlib.reload(xsd_parser.models.xsd_parser_models)
-        # import xsd_parser.models.xsd_parser_models
+        print("debug")
+        pass
         
 
     def run(self):
@@ -1976,8 +1908,7 @@ class NgisOpenApiClient:
             self.dlg.addLayerButton.clicked.connect(self.handle_add_layer)
             self.dlg.polyFromLineButton.clicked.connect(self.handle_make_polygon_from_line)
             
-            self.dlg.debugButton.clicked.connect(self.handle_debug_commands)
-            self.dlg.debugButton2.clicked.connect(self.handle_debug2_commands)
+            #self.dlg.debugButton.clicked.connect(self.handle_debug_commands)
 
         # show the dialog
         self.dlg.show()
@@ -2055,7 +1986,7 @@ class ProcessFeatureTypeTask(QgsTask):
 
         def run(self):
             print(f"Running task: {self.description}")
-
+            
             # Create a new GeoJSON object containing a single featuretype
             features_json = json.dumps(self.geojson, ensure_ascii=False)
 
@@ -2064,49 +1995,22 @@ class ProcessFeatureTypeTask(QgsTask):
             fields = QgsJsonUtils.stringToFields(features_json, self.codec)
             newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, self.codec)
 
-
-            z = -99999
-            # 2. Fyll ut features i featuretypsene
+            # Fyll ut features i featuretypsene
             if newFeatures:
                 for feature in newFeatures:
-
-                    feature_geom = feature.geometry()
-                    
-                    wkbtype = feature_geom.wkbType()
-                    if not QgsWkbTypes.hasZ(wkbtype):
-                        geom = feature_geom
-                        geom_type = geom.type()
-
-                        if geom_type == QgsWkbTypes.PointGeometry:
-                            geom_point = geom.asPoint()
-                            x, y = geom_point.x(), geom_point.y()
-                            feature.setGeometry(QgsGeometry.fromWkt(f'PointZ({x} {y} {z})'))
-                        
-                        elif geom_type == QgsWkbTypes.LineGeometry:
-                            points_3d = []
-                            for pt in geom.asPolyline():
-                                x, y = pt.x(), pt.y()
-                                points_3d.append(f"{x} {y} {z}")
-                            feature.setGeometry(QgsGeometry.fromWkt(f'LineStringZ({", ".join(points_3d)})'))
-                        
-                        elif geom_type == QgsWkbTypes.PolygonGeometry:
-                            rings_3d = []
-                            for ring in geom.asPolygon():
-                                points_3d = []
-                                for pt in ring:
-                                    x, y = pt.x(), pt.y()
-                                    points_3d.append(f"{x} {y} {z}")
-                                rings_3d.append(f"({', '.join(points_3d)})")
-                            feature.setGeometry(QgsGeometry.fromWkt(f'PolygonZ({", ".join(rings_3d)})'))
-
-
-                    geom_type_wkb_str = QgsWkbTypes.displayString(feature.geometry().wkbType())
-
-                    if geom_type_wkb_str not in self.geometry_dict:
-                        self.geometry_dict[geom_type_wkb_str] = []
-
-                    self.geometry_dict[geom_type_wkb_str].append(feature)
-
+                    geom = feature.geometry()
+                    geom_simple_type = None
+                    if geom.type() == QgsWkbTypes.PointGeometry:
+                        geom_simple_type = "Point"
+                    elif geom.type() == QgsWkbTypes.LineGeometry:
+                        geom_simple_type = "LineString"
+                    elif geom.type() == QgsWkbTypes.PolygonGeometry:
+                        geom_simple_type = "Polygon"
+                    else:
+                        raise Exception(f"Unknown geometry type: {geom.type()}")
+                    if geom_simple_type not in self.geometry_dict:
+                        self.geometry_dict[geom_simple_type] = []
+                    self.geometry_dict[geom_simple_type].append(feature)
 
             # oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
 
@@ -2119,12 +2023,24 @@ class ProcessFeatureTypeTask(QgsTask):
             relevant_attributes = set([a.name for a in relevant_attributes])
             relevant_attributes.add('featuretype')
 
+
             for geom_type, features in self.geometry_dict.items():
                 layername = f'{self.feature_type}-{geom_type}'
                 lyr = self.layers.get(layername, None)
                 if lyr == None:
-                    raise Exception(f"Layer {layername} not found 1")
-                    lyr = QgsVectorLayer(f'{geom_type}?crs={self.plugin.crs_from_api}', layername, "memory")
+                    raise Exception(f"Layer {layername} not found!")
+
+
+                relations = {}
+                relation_manager = QgsProject.instance().relationManager()
+                for relation in relation_manager.relations().values():
+                    if relation.referencedLayerId() == lyr.id():
+                        relevant_attributes.remove(relation.name())
+                        rel_fields = relation.referencedFields() # assume same name in both layers, otherwise resolve fields
+                        rel_fields = [lyr.fields()[a].name() for a in rel_fields]
+                        relations[relation.name()]  = {"rel_lyr" : relation.referencingLayer(), "rel_fields": rel_fields}
+
+                
 
                 #self.plugin.feature_type_to_layer[self.feature_type] = lyr
                 #QgsProject.instance().addMapLayer(lyr, False)
@@ -2138,15 +2054,21 @@ class ProcessFeatureTypeTask(QgsTask):
                     fet.setGeometry(feature.geometry())
 
                     attributes = feature.attributes()
+                    fields = feature.fields()
                     newDict = {}
+                    
+                    related_fields = {}
+
                     for idx, attribute in enumerate(attributes):
                         # TODO dette er sikkert ikke riktig. Mangler en del egenskaper
-                        fields = feature.fields()
-
-                        xsd_def = self.plugin.xsd[self.feature_type].get(fields.at(idx).name(), None)
+                        field_name = fields.at(idx).name()
+                        xsd_def = self.plugin.xsd[self.feature_type].get(field_name, None)
 
                         if isinstance(xsd_def, Geometry): continue
                         if isinstance(xsd_def, Avgrensing): continue
+                        if field_name in relations: 
+                            related_fields[field_name] = feature.attributes()[idx]
+                            continue
 
                         oldfield = fields.at(idx)
                         if xsd_def and feature.attributes()[idx] != None and xsd_def.type == "enum" and xsd_def.maxOccurs > 1:
@@ -2191,6 +2113,19 @@ class ProcessFeatureTypeTask(QgsTask):
                     l_d.addFeature(fet)
                     self.plugin.old_geom_dict[(lyr.id(), fet['lokalId'])] = fet.geometry()
 
+                    # Add related features
+                    
+                    for field_name, related_attributes in related_fields.items():
+                        if related_attributes == None: continue
+                        relation = relations[field_name]
+                        related_layer = relation['rel_lyr']
+                        if not related_layer.isEditable():
+                            related_layer.startEditing()
+                        related_fields_dict = {a: fet[a] for a in relation['rel_fields']}
+                        for related_attribute in related_attributes:
+                            related_attribute.update(related_fields_dict)
+                            self.addRelationFeature(related_attribute, related_layer)
+                        related_layer.commitChanges()
 
                 # update the extent of rev_lyr
                 lyr.updateExtents()
@@ -2198,21 +2133,12 @@ class ProcessFeatureTypeTask(QgsTask):
                 lyr.commitChanges()
                 self.layers[lyr.name()] = lyr
 
-
-                #self.plugin.layer_dictionary[lyr.id()] = lyr #todo andreas
-                #self.plugin.layers_pending_commit[lyr.id()] = set()
-                #self.layer_feature_history_dictionary[lyr.id()] = {}
-
                 # ------------------------------------
 
 
 
                 if self.feature_type in slds:
                     lyr.loadSldStyle(slds[self.feature_type])
-
-               # self.plugin.dataset_dictionary[lyr.id()] = self.plugin.selected_id
-                #self.plugin.feature_type_dictionary[lyr.id()] = self.feature_type
-
 
 
             for feature in self.geojson['features']:
@@ -2224,7 +2150,17 @@ class ProcessFeatureTypeTask(QgsTask):
             self.resultSignal.emit((self.id, self.feature_type, self.geometry_dict))
 
             return True  # indicates successful completion
-    
+
+        def addRelationFeature(self, related_attribute, related_layer):
+            new_feature = QgsFeature(related_layer.fields())
+        
+            for attr_key, attr_value in related_attribute.items():
+                field_idx = new_feature.fieldNameIndex(attr_key)
+                if field_idx != -1:
+                    new_feature.setAttribute(field_idx, attr_value)
+
+                related_layer.addFeature(new_feature)
+
         def finished(self, result):
             if result:
                 print(f'Task {self.description} completed successfully')

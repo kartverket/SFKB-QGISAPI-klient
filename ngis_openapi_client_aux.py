@@ -159,12 +159,12 @@ def xsd_to_fields(lyr, xsd_def, complex_multiple_lyr = {}):
         if fieldName == "navnerom":
             lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'data.geonorge.no/havnedata/so'"))
             form_config = lyr.editFormConfig()
-            form_config.setReadOnly(field_idx, True)
+            form_config.setReadOnly(field_idx, False)
             lyr.setEditFormConfig(form_config)
         if fieldName == "versjonId":
-            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'2020-11-25 09:22:03.599000'"))
+            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("now()", True))
             form_config = lyr.editFormConfig()
-            form_config.setReadOnly(field_idx, True)
+            form_config.setReadOnly(field_idx, False)
             lyr.setEditFormConfig(form_config)
 
 def add_featuretype_field_to_layer(lyr, feature_type):

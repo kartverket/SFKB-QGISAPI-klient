@@ -140,11 +140,11 @@ class XsdParser:
             if xsdElement.typeName == 'CodeType': 
                 return self.handle_kodeliste(xsdElement, parentAttribute, session)
             if xsdElement.typeName == 'SurfacePropertyType':
-                return [Geometry(xsdElement.name, QgsWkbTypes.PolygonZ, xsdElement.minOccurs, xsdElement.maxOccurs, xsdElement.documentation)]
+                return [Geometry(xsdElement.name, QgsWkbTypes.Polygon, xsdElement.minOccurs, xsdElement.maxOccurs, xsdElement.documentation)]
             if xsdElement.typeName == 'PointPropertyType':
-                return [Geometry(xsdElement.name, QgsWkbTypes.PointZ, xsdElement.minOccurs, xsdElement.maxOccurs, xsdElement.documentation)]
+                return [Geometry(xsdElement.name, QgsWkbTypes.Point, xsdElement.minOccurs, xsdElement.maxOccurs, xsdElement.documentation)]
             if xsdElement.typeName == 'CurvePropertyType':
-                return [Geometry(xsdElement.name, QgsWkbTypes.LineStringZ, xsdElement.minOccurs, xsdElement.maxOccurs, xsdElement.documentation)]
+                return [Geometry(xsdElement.name, QgsWkbTypes.LineString, xsdElement.minOccurs, xsdElement.maxOccurs, xsdElement.documentation)]
             return []
         
         if not xsdElement.typeNamespace:

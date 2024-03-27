@@ -1685,7 +1685,7 @@ class NgisOpenApiClient:
                         for name in names:
                             position = val_list.index(name)
                             values.append(xsd_element.values[position]["value"])
-                            value = values
+                        value = values
                     else:
                         # Enums med maxoccurs = 1 (Value Map)
                         val_list = [a["type"] for a in xsd_element.values]

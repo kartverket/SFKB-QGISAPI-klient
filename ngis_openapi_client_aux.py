@@ -189,11 +189,12 @@ def field_to_valuerelation(layer, field_idx, allow_null):
                 'AllowMulti': True,
                 'AllowNull': allow_null,
                 'FilterExpression': '',
-                'Key': 'Verdi',
+                'Key': 'Kodeverdi',
                 'NofColumns': 1,
                 'OrderByValue': False,
                 'UseCompleter': False,
-                'Value': 'Verdi'
+                'Value': 'Navn',
+                'Description' : 'Beskrivelse'
             }
     widget_setup = QgsEditorWidgetSetup(field_type, config)
     layer.setEditorWidgetSetup(field_idx, widget_setup)

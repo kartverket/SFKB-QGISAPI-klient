@@ -21,11 +21,15 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate, QVariant, pyqtSignal
+import xml.etree.ElementTree as ET
+import tempfile
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QTextCodec, QDate, QVariant, pyqtSignal, QFile, QXmlStreamReader
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QPushButton, QMessageBox, QInputDialog, QUndoStack, QUndoCommand 
 from qgis.utils import plugins, active_plugins
+from qgis.PyQt.QtXml import QDomDocument
 from qgis.core import (
+    QgsReadWriteContext,
     QgsSnappingConfig,
     QgsProject,
     QgsFields,
@@ -262,7 +266,7 @@ class NgisOpenApiClient:
         icon_path = ':/plugins/ngis_openapi_client/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'NGIS-OpenAPI Test v0.53'),
+            text=self.tr(u'NGIS-OpenAPI Test v0.54'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
@@ -273,7 +277,7 @@ class NgisOpenApiClient:
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
-                self.tr(u'&NGIS-OpenAPI Test v0.53'),
+                self.tr(u'&NGIS-OpenAPI Test v0.54'),
                 action)
             self.iface.removeToolBarIcon(action)
 
@@ -498,17 +502,24 @@ class NgisOpenApiClient:
                     vector_names = [l.name() for l in QgsProject().instance().mapLayers().values() if isinstance(l, QgsVectorLayer)]
                     if attrNavn in vector_names: continue
 
-                    lyr = QgsVectorLayer('NoGeometry?crs=EPSG:4326&field=Verdi:string(40,0)', f'{attrNavn}', "memory")
+                    lyr = QgsVectorLayer('NoGeometry?crs=EPSG:4326', f'{attrNavn}', "memory")
                     lyr.setCustomProperty("skipMemoryLayersCheck", 1) #13012022
                     lyr.startEditing()
+                    
                     l_d = lyr.dataProvider()
                     fields = QgsFields()
-                    fields.append(QgsField('Verdi', QVariant.String, '', 254, 0))
+                    fields.append(QgsField('Navn', QVariant.String, '', 254, 0))
+                    fields.append(QgsField('Beskrivelse', QVariant.String, '', 254, 0))
+                    fields.append(QgsField('Kodeverdi', QVariant.String, '', 254, 0))
+                    l_d.addAttributes(fields)
+                    lyr.updateFields()
 
                     for val in attrVerdi.values:
                         fet = QgsFeature()
                         fet.setFields(fields)
-                        fet['Verdi']=val['value']
+                        fet['Navn']=val['type']
+                        fet['Beskrivelse']=val['desc']
+                        fet['Kodeverdi']=val['value']
                         l_d.addFeature(fet)
 
 
@@ -691,7 +702,7 @@ class NgisOpenApiClient:
 
     def get_sld(self):
         sld_dict = {}
-        folder_name = f"{os.path.dirname(__file__)}/styles"
+        folder_name = f"{os.path.dirname(__file__)}/styles_v2"
         for filename in os.listdir(folder_name):
             full_path = f"{folder_name}/{filename}"
             sld = minidom.parse(full_path)
@@ -1667,8 +1678,16 @@ class NgisOpenApiClient:
                     value = float(value)
                 elif xsd_element.type == "enum":
                     if xsd_element.maxOccurs > 1:
-                        value = value[1:-1].split(", ") if len(value[1:-1]) > 0 else []
+                        # Enums med maxoccurs > 1 (Value Relation)
+                        values = []
+                        val_list = [a["type"] for a in xsd_element.values]
+                        names = value[1:-1].split(", ") if len(value[1:-1]) > 0 else []
+                        for name in names:
+                            position = val_list.index(name)
+                            values.append(xsd_element.values[position]["value"])
+                            value = values
                     else:
+                        # Enums med maxoccurs = 1 (Value Map)
                         val_list = [a["type"] for a in xsd_element.values]
                         try:
                             position = val_list.index(value)
@@ -1995,18 +2014,18 @@ class ProcessFeatureTypeTask(QgsTask):
             fields = QgsJsonUtils.stringToFields(features_json, self.codec)
             newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, self.codec)
 
-            # Fyll ut features i featuretypsene
+             # Fyll ut features i featuretypsene
             if newFeatures:
                 for feature in newFeatures:
                     geom = feature.geometry()
                     geom_simple_type = None
-                    if geom.type() == QgsWkbTypes.PointGeometry:
-                        geom_simple_type = "Point"
-                    elif geom.type() == QgsWkbTypes.LineGeometry:
-                        geom_simple_type = "LineString"
-                    elif geom.type() == QgsWkbTypes.PolygonGeometry:
-                        geom_simple_type = "Polygon"
-                    else:
+                    geometry_type_map = {
+                        QgsWkbTypes.PointGeometry: "Point",
+                        QgsWkbTypes.LineGeometry: "LineString",
+                        QgsWkbTypes.PolygonGeometry: "Polygon"
+                    }
+                    geom_simple_type = geometry_type_map.get(geom.type())
+                    if geom_simple_type is None:
                         raise Exception(f"Unknown geometry type: {geom.type()}")
                     if geom_simple_type not in self.geometry_dict:
                         self.geometry_dict[geom_simple_type] = []
@@ -2015,6 +2034,7 @@ class ProcessFeatureTypeTask(QgsTask):
             # oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
 
             slds = self.plugin.get_sld()
+
 
 
 
@@ -2078,7 +2098,8 @@ class ProcessFeatureTypeTask(QgsTask):
                                 vals = feature.attributes()[idx][3:-1].split(",")
 
                             vals = ','.join(vals)
-                            newDict[oldfield.name()] = f'{{{vals}}}'
+                            newDict[oldfield.name()] = f'{{"{vals}"}}'
+                            #newDict[oldfield.name()] = vals
 
                         else:
                             obj = {}
@@ -2138,8 +2159,8 @@ class ProcessFeatureTypeTask(QgsTask):
 
 
                 if self.feature_type in slds:
-                    lyr.loadSldStyle(slds[self.feature_type])
-
+                    modified_sld = self.modifyStyle(self.plugin.xsd[self.feature_type], slds[self.feature_type])
+                    self.loadStyle(lyr, modified_sld)
 
             for feature in self.geojson['features']:
             #for feature in features_from_api:
@@ -2160,6 +2181,75 @@ class ProcessFeatureTypeTask(QgsTask):
                     new_feature.setAttribute(field_idx, attr_value)
 
                 related_layer.addFeature(new_feature)
+
+        def modifyStyle(self, xsd, style):
+            
+            with open(style, 'r') as file:
+                sld_content = file.read()
+
+            # Parse the SLD content
+            tree = ET.ElementTree(ET.fromstring(sld_content))
+            parent_map = {c:p for p in tree.iter() for c in p}
+            root = tree.getroot()
+
+            # Define the namespaces to search with them
+            namespaces = {
+                'se': 'http://www.opengis.net/se',
+                'ogc': 'http://www.opengis.net/ogc'
+            }
+
+            for property_name in root.findall(".//ogc:PropertyName", namespaces):
+                field_text = property_name.text
+                xsd_element = xsd.get(field_text, None)
+                
+                if xsd_element and xsd_element.type == "enum" and xsd_element.maxOccurs > 1:
+                    # Navigate up to the parent of the PropertyName (e.g., a Filter or a ComparisonOps) and then find the Literal
+                    parent = parent_map[property_name]
+                    
+                    if parent is not None:
+                        # Find the corresponding ogc:Literal within the same rule/filter
+                        for literal in parent.findall(".//ogc:Literal", namespaces):
+                            # For demonstration, let's add curly brackets to all literals found this way
+                            literal.text = f'{{"{literal.text}"}}'
+
+            modified_sld = ET.tostring(root, encoding='unicode')
+
+            return modified_sld
+        
+        def loadStyle(self, lyr, modified_sld):
+            resultFlag = False
+ 
+            myDocument = QDomDocument()
+               
+            myErrorMessage = ""
+
+            resultFlag = myDocument.setContent(QXmlStreamReader(modified_sld), True)
+            
+            if not resultFlag:
+                return myErrorMessage
+            
+            #check for root SLD element
+            myRoot = myDocument.firstChildElement("StyledLayerDescriptor")
+            if myRoot.isNull():
+                myErrorMessage = f"Error: StyledLayerDescriptor element not found"
+                resultFlag = False
+                return myErrorMessage
+            
+            namedLayerElem = myRoot.firstChildElement("NamedLayer" )
+            if namedLayerElem.isNull():
+                myErrorMessage = "Info: NamedLayer element not found."
+                resultFlag = False
+                return myErrorMessage
+            
+            
+            errorMsg = ""
+            resultFlag = lyr.readSld(namedLayerElem, errorMsg)
+            if not resultFlag:
+            
+                myErrorMessage = f'Loading style failed because:\n{errorMsg}'
+                return myErrorMessage
+  
+            return
 
         def finished(self, result):
             if result:

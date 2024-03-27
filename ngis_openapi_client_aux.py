@@ -1,4 +1,5 @@
 import json
+import uuid
 from qgis.core import (
     QgsProject,
     QgsPathResolver,
@@ -25,10 +26,36 @@ from qgis.core import (
     QgsApplication,
     QgsMessageLog,
     QgsFields,
-    QgsField
+    QgsField,
+    QgsRelation
 )
 from PyQt5.QtCore import QVariant, QSettings, QTranslator, QCoreApplication, QTextCodec, QDate
-from ngis_openapi_client_xsd_parser import Attribute
+
+from xsd_parser.models.xsd_parser_models import (Attribute, Avgrensing, Geometry)
+
+#Attribute = __import__("SFKB-QGISAPI-klient.ngis_openapi_client_xsd_parser").ngis_openapi_client_xsd_parser.Attribute
+#Avgrensing = __import__("SFKB-QGISAPI-klient.ngis_openapi_client_xsd_parser").ngis_openapi_client_xsd_parser.Avgrensing
+#Geometry = __import__("SFKB-QGISAPI-klient.ngis_openapi_client_xsd_parser").ngis_openapi_client_xsd_parser.Geometry
+
+
+def utledAvgrensinger(xsd):
+    
+    avgrenser = {}
+    avgrensesAv = {}
+
+    for subkey, sublist in xsd.items():
+        for k, v in sublist.items():
+            if isinstance(v, Avgrensing):
+                if v.avgrensesAv not in avgrenser:
+                    avgrenser[v.avgrensesAv] = []
+                avgrenser[v.avgrensesAv].append(subkey)
+
+                if subkey not in avgrensesAv:
+                    avgrensesAv[subkey] = []
+                avgrensesAv[subkey].append(v.avgrensesAv)
+    
+    return avgrenser, avgrensesAv
+
 
 def create_crs_entry(epsg):
     return {
@@ -53,24 +80,20 @@ def try_parse_json(myjson):
     except Exception:
         return myjson
 
-def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
+def of_type(iterable, target_type):
+        return [i for i in iterable if isinstance(i, target_type)]
 
-    xsd_def = xsd[feature_type]
-    lyr.addAttribute(QgsField("featuretype", QVariant.String))
+def xsd_to_fields(lyr, xsd_def, complex_multiple_lyr = {}):
+    
 
-    for field_idx, fieldName in enumerate(xsd_def, 1):
-        field_def : Attribute = xsd_def[fieldName]
+    for fieldName, field_def in xsd_def.items():
+        
+        #todo andreas (handle geometry og avgrensingslinjer, ignoreR?)
+        if not isinstance(xsd_def[fieldName], Attribute): continue
+
         field_type = field_def.type
 
         field = None
-
-        if field_def.minOccurs == 1:
-            constaints = QgsFieldConstraints()
-            constaints.setConstraint(1)
-            featuretype_idx = fields.indexOf(fieldName)
-            if featuretype_idx > -1:
-                field = fields.field(featuretype_idx)
-                field.setConstraints(constaints)
 
         if field_type == "date":
             field = QgsField(fieldName, QVariant.Date, comment = field_def.documentation)
@@ -84,6 +107,23 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
             field = QgsField(fieldName, QVariant.Double, comment = field_def.documentation)
         elif field_type == "boolean":
             field = QgsField(fieldName, QVariant.Bool, comment = field_def.documentation)
+        elif  "PropertyType" in field_type:
+            xsdChildName = field_type.split("PropertyType")[0]
+            relation_layer = complex_multiple_lyr.get(xsdChildName, None)
+            if relation_layer is None:
+                raise Exception(f"Relation layer not found for {xsdChildName}")
+            relation = QgsRelation()
+            relation_id = str(uuid.uuid4())
+            relation.setId(relation_id) 
+            relation.setName(fieldName)
+            relation.setReferencingLayer(relation_layer.id())  # Child layer
+            relation.setReferencedLayer(lyr.id())  # Parent layer
+            relation.addFieldPair('lokalId', 'lokalId')
+            QgsProject.instance().relationManager().addRelation(relation)
+            if not relation.isValid(): 
+                raise Exception(f"Relation not valid for {xsdChildName}")     
+            continue            
+        
         else:
             field = QgsField(fieldName, QVariant.String, comment = field_def.documentation)
 
@@ -94,6 +134,7 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
             field.setConstraints(constaints)
 
         lyr.addAttribute(field)
+        field_idx = lyr.fields().indexFromName(fieldName)
 
         if field_type == "date":
             field_to_date(lyr, field_idx)
@@ -101,9 +142,6 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
             field_to_datetime(lyr, field_idx)
         if field_type == "string":
             lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("''"))
-            #default_text = field_def['default'] if 'default' in field_def else None
-            #if default_text:
-            #    field_to_default_text(lyr, field_idx, field_type, default_text)
         if field_type == "enum":
             enum = field_def.values
             if enum:
@@ -111,25 +149,29 @@ def add_fields_to_layer(lyr , fields : QgsFields, feature_type, xsd):
                     field_to_valuerelation(lyr, field_idx, field_def.minOccurs == 0)
                 else:
                     field_to_valuemap(lyr, field_idx, enum)
-        read_only = field_def.readOnly
         
+        # Some default values
         if fieldName == "lokalId":
-            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'<autogenerert>'"))
+            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("replace(replace(uuid(), '{', ''), '}', '')"))
             form_config = lyr.editFormConfig()
             form_config.setReadOnly(field_idx, True)
             lyr.setEditFormConfig(form_config)
         if fieldName == "navnerom":
             lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'data.geonorge.no/havnedata/so'"))
             form_config = lyr.editFormConfig()
-            form_config.setReadOnly(field_idx, True)
+            form_config.setReadOnly(field_idx, False)
             lyr.setEditFormConfig(form_config)
         if fieldName == "versjonId":
-            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("'2020-11-25 09:22:03.599000'"))
+            lyr.setDefaultValueDefinition(field_idx, QgsDefaultValue("now()", True))
             form_config = lyr.editFormConfig()
-            form_config.setReadOnly(field_idx, True)
+            form_config.setReadOnly(field_idx, False)
             lyr.setEditFormConfig(form_config)
-    
-    featuretype_idx = fields.indexOf("featuretype")
+
+def add_featuretype_field_to_layer(lyr, feature_type):
+
+    # Featuretype should not be writable
+    lyr.addAttribute(QgsField("featuretype", QVariant.String))
+    featuretype_idx = lyr.fields().indexOf("featuretype")
     if featuretype_idx >= 0:
         lyr.setDefaultValueDefinition(featuretype_idx, QgsDefaultValue(f'\'{feature_type}\''))
         form_config = lyr.editFormConfig()
@@ -211,138 +253,3 @@ class ApiError(object):
         except:
             pass
 
-class AddFeaturesToMap(QgsTask):
-    """This shows how to subclass QgsTask"""
-    
-    def __init__(self, description, parent, features_from_api, feature_type, features_list, crs_from_api, group, slds, xsd, selected_id):
-        super().__init__(description, QgsTask.CanCancel)
-        self.description = description
-        self.parent = parent
-        self.features_from_api = features_from_api
-        self.feature_type = feature_type
-        self.features_list = features_list
-        self.crs_from_api = crs_from_api
-        self.group = group
-        self.slds = slds
-        self.xsd = xsd
-        self.selected_id = selected_id
-
-
-    
-    def run(self):
-        """Here you implement your heavy lifting.
-        Should periodically test for isCanceled() to gracefully
-        abort.
-        This method MUST return True or False.
-        Raising exceptions will crash QGIS, so we handle them
-        internally and raise them in self.finished
-        """
-        print(f"Started task {self.description}")
-
-        # Create a new GeoJSON object containing a single featuretype
-        features_dict = self.features_from_api.copy()
-        features_dict['features'] =  self.features_list
-
-        features_json = json.dumps(features_dict, ensure_ascii=False) 
-        
-        # Identify fields and features from GeoJSON
-        codec = QTextCodec.codecForName("UTF-8")   
-        fields = QgsJsonUtils.stringToFields(features_json, codec)
-        newFeatures = QgsJsonUtils.stringToFeatureList(features_json, fields, codec)
-
-        # If different geometry types are identified, separate them into individual layers
-        geometry_dict = {}
-        if newFeatures:   
-            for feature in newFeatures:
-
-                featuretype = feature.attribute('featuretype')
-                geom_type = feature.geometry()
-                geom_type = QgsWkbTypes.displayString(int(geom_type.wkbType()))
-                if geom_type not in geometry_dict:
-                    geometry_dict[geom_type] = {}
-                if featuretype not in geometry_dict[geom_type]:
-                    geometry_dict[geom_type][featuretype] = []
-                
-                geometry_dict[geom_type][featuretype].append(feature)
-
-        for geom_type, feature_types in geometry_dict.items():
-            for feature_type, features in feature_types.items():
-                lyr = QgsVectorLayer(f'{geom_type}?crs={self.crs_from_api}', f'{feature_type}-{geom_type}', "memory")
-                #lyr = QgsVectorLayer(f'{geom_type}?crs=EPSG:25832', f'{feature_type}-{geom_type}', "memory") #TODO Remove
-                QgsProject.instance().addMapLayer(lyr, False)
-                
-                lyr.startEditing()
-                
-                add_fields_to_layer(lyr, fields, feature_type, self.xsd)
-                print(f'{geom_type}?crs={self.crs_from_api}', f'{feature_type}-{geom_type}')   
-                lyr.commitChanges()
-                l_d = lyr.dataProvider()
-                lyrfields = lyr.fields()
-
-                for feature in features:
-                    fet = QgsFeature()
-                    fet.setGeometry(feature.geometry())
-
-                    attributes = feature.attributes()
-                    newDict = {}
-                    for idx, attribute in enumerate(attributes):
-                        try:
-                            obj = json.loads(attribute)
-                            for key, value in obj.items():
-                                newDict[key] = value
-                        except:
-                            oldfield = fields.at(idx)
-                            newDict[oldfield.name()] = feature.attributes()[idx]
-
-                    fieldOrder = {}
-                    fet.initAttributes(len(lyrfields))
-                    for fieldName in newDict.keys():
-                        newIdx = lyrfields.indexFromName(fieldName)
-                        fieldOrder[fieldName] = newIdx
-                        print(f'{newIdx} - {newDict[fieldName]}')
-                        try:
-                            fet.setAttribute(newIdx, newDict[fieldName])
-                        except Exception as e:
-                            print(e)
-                    l_d.addFeature(fet)
-
-                
-                # update the extent of rev_lyr
-                lyr.updateExtents()
-                # save changes made in 'rev_lyr'
-                lyr.commitChanges()
-                self.group.addLayer(lyr)
-                
-                #lyr.committedFeaturesAdded.connect(self.handleCommitedAddedFeatures)
-                #lyr.committedFeaturesRemoved.connect(self.handleCommittedFeaturesRemoved)
-                #lyr.featuresDeleted.connect(self.handleDeletedFeatures)
-                #lyr.committedGeometriesChanges(self.ee)
-                
-                lyr.beforeCommitChanges.connect(self.parent.handle_before_commitchanges)
-
-                if feature_type in self.slds:
-                    lyr.loadSldStyle(self.slds[feature_type])
-
-                self.parent.dataset_dictionary[lyr.id()] = self.selected_id
-                self.parent.feature_type_dictionary[lyr.id()] = feature_type
-        return True
-
-    def finished(self, result):
-        """
-        This function is automatically called when the task has
-        completed (successfully or not).
-        You implement finished() to do whatever follow-up stuff
-        should happen after the task is complete.
-        finished is always called from the main thread, so it's safe
-        to do GUI operations and raise Python exceptions here.
-        result is the return value from self.run.
-        """
-
-        print("FERDIG")
-
-    def cancel(self):
-        QgsMessageLog.logMessage(
-            'Task "{name}" was canceled'.format(
-                name=self.description()),
-            MESSAGE_CATEGORY, Qgis.Info)
-        super().cancel()

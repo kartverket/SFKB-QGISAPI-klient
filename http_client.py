@@ -23,8 +23,7 @@ class NgisHttpClient:
         self.configuration.password=password
         # DEBUG FIDDLER
         #self.configuration.proxy = "https://127.0.0.1:8888"
-        self.configuration.verify_ssl = False
-        
+        #self.configuration.verify_ssl = False
         self.metadata_api_instance = swagger_client.MetadataApi(swagger_client.ApiClient(self.configuration))
         self.features_api_instance = swagger_client.FeaturesApi(swagger_client.ApiClient(self.configuration))
 
@@ -48,6 +47,11 @@ class NgisHttpClient:
     def getDatasetFeatureWithLock(self, dataset_id, lokal_id, crs_epsg, references='none'):
         self.features_api_instance.api_client.set_default_header("Accept", "application/vnd.kartverket.sosi+json")
         feature = self.features_api_instance.get_dataset_feature(self.x_client_product_version, dataset_id, lokal_id, references=references, locking_type='user_lock', crs_epsg=crs_epsg)
+        return feature
+    
+    def getDatasetFeatureWithoutLock(self, dataset_id, lokal_id, crs_epsg, references='none'):
+        self.features_api_instance.api_client.set_default_header("Accept", "application/vnd.kartverket.sosi+json")
+        feature = self.features_api_instance.get_dataset_feature(self.x_client_product_version, dataset_id, lokal_id, references=references, crs_epsg=crs_epsg)
         return feature
 
     def getDatasetFeatures(self, dataset_id, bbox, crs_epsg, limit=None, references='none'):

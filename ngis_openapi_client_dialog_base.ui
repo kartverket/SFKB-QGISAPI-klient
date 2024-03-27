@@ -103,6 +103,35 @@
     </rect>
    </property>
   </widget>
+  <widget class="QPushButton" name="polyFromLineButton">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="geometry">
+    <rect>
+     <x>140</x>
+     <y>200</y>
+     <width>151</width>
+     <height>28</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Create Polygon From Line</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label">
+   <property name="geometry">
+    <rect>
+     <x>140</x>
+     <y>180</y>
+     <width>47</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Verktøy:</string>
+   </property>
+  </widget>
  </widget>
  <customwidgets>
   <customwidget>

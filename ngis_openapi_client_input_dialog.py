@@ -7,9 +7,9 @@ class NgisInputTypeDialog(QtWidgets.QWidget):
     item = None
     ok = False
     
-    def __init__(self, options):
+    def __init__(self, prompt_title, prompt_text, prompt_options):
         super().__init__()
-        self.initUI(options)
+        self.initUI(prompt_title, prompt_text, prompt_options)
 
     # def initUI(self, options):
     #     self.btn = QtWidgets.QPushButton('Show Dialog', self)
@@ -28,8 +28,8 @@ class NgisInputTypeDialog(QtWidgets.QWidget):
     #     if ok:
     #         self.le.setText(str(text))
     
-    def initUI(self, options):
-        self.item, self.ok = QtWidgets.QInputDialog.getItem(self, "Avgrensingslinje", "Spesifisér type avgrensingslinje", options, 0, False)
+    def initUI(self, prompt_title, prompt_text, options):
+        self.item, self.ok = QtWidgets.QInputDialog.getItem(self, prompt_title, prompt_text, options, 0, False)
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)

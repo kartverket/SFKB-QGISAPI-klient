@@ -2180,7 +2180,7 @@ class ProcessFeatureTypeTask(QgsTask):
                 if field_idx != -1:
                     new_feature.setAttribute(field_idx, attr_value)
 
-                related_layer.addFeature(new_feature)
+            related_layer.dataProvider().addFeature(new_feature)
 
         def modifyStyle(self, xsd, style):
             

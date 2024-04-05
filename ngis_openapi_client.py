@@ -266,7 +266,7 @@ class NgisOpenApiClient:
         icon_path = ':/plugins/ngis_openapi_client/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'NGIS-OpenAPI Test v0.54'),
+            text=self.tr(u'NGIS-OpenAPI Test v0.55'),
             callback=self.run,
             parent=self.iface.mainWindow())
 
@@ -277,7 +277,7 @@ class NgisOpenApiClient:
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
-                self.tr(u'&NGIS-OpenAPI Test v0.54'),
+                self.tr(u'&NGIS-OpenAPI Test v0.55'),
                 action)
             self.iface.removeToolBarIcon(action)
 

@@ -1,0 +1,38 @@
+# nonk8s
+apiVersion: "backstage.io/v1alpha1"
+kind: "Component"
+metadata:
+  name: "SFKB-QGISAPI-klient"
+  tags:
+  - "public"
+spec:
+  type: "website"
+  lifecycle: "production"
+  owner: "nasjonalt_geografisk_informasjonssystem_qms"
+  system: "ngis"
+---
+apiVersion: "backstage.io/v1alpha1"
+kind: "Group"
+metadata:
+  name: "security_champion_SFKB-QGISAPI-klient"
+  title: "Security Champion SFKB-QGISAPI-klient"
+spec:
+  type: "security_champion"
+  parent: "land_security_champions"
+  members:
+  - "NilsIvarNes"
+  children:
+  - "resource:SFKB-QGISAPI-klient"
+---
+apiVersion: "backstage.io/v1alpha1"
+kind: "Resource"
+metadata:
+  name: "SFKB-QGISAPI-klient"
+  links:
+  - url: "https://github.com/kartverket/SFKB-QGISAPI-klient"
+    title: "SFKB-QGISAPI-klient på GitHub"
+spec:
+  type: "repo"
+  owner: "security_champion_SFKB-QGISAPI-klient"
+  dependencyOf:
+  - "component:SFKB-QGISAPI-klient"
